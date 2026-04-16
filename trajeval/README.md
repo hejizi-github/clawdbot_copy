@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- **确定性指标** — 步骤效率、工具准确率、循环检测、Token 效率
+- **确定性指标** — 步骤效率、工具准确率、循环检测、Token 效率、错误恢复、延迟预算
 - **LLM 裁判** — 基于评分维度的 LLM-as-judge 评估（使用 Claude 模型）
 - **回归检测** — 对比两条轨迹，标记指标退步
 - **人工校准** — 人工标注轨迹后，计算与 LLM 裁判打分的相关性
@@ -86,6 +86,8 @@ trajeval eval trace.json
 │ tool_accuracy     │  1.00 │ PASS   │
 │ loop_detection    │  1.00 │ PASS   │
 │ token_efficiency  │  1.00 │ PASS   │
+│ error_recovery    │  1.00 │ PASS   │
+│ latency_budget    │  1.00 │ PASS   │
 ├───────────────────┼───────┼────────┤
 │ Overall           │  1.00 │ PASS   │
 └───────────────────┴───────┴────────┘
@@ -162,6 +164,7 @@ trajeval eval trace.json --expected-steps 5 --baseline-tokens 1000
 | `--expected-steps` | — | 期望步骤数基线（用于效率评分） |
 | `--baseline-tokens` | — | Token 用量基线（用于效率评分） |
 | `--recovery-window` | `3` | 错误后检查恢复的步骤窗口大小 |
+| `--latency-budget` | — | 延迟预算（毫秒），用于速度评分 |
 
 Exit code：所有指标通过返回 `0`，任一指标失败返回 `1`。
 
@@ -205,6 +208,7 @@ trajeval compare baseline.json current.json --format markdown
 | `--expected-steps` | — | 期望步骤数基线 |
 | `--baseline-tokens` | — | Token 用量基线 |
 | `--recovery-window` | `3` | 错误后检查恢复的步骤窗口大小 |
+| `--latency-budget` | — | 延迟预算（毫秒），用于速度评分 |
 
 `markdown` 格式输出适合直接贴到 GitHub PR 评论中。
 
@@ -256,6 +260,7 @@ trajeval calibrate annotations.jsonl judgments.jsonl --threshold 0.8
 | **loop_detection** | 通过 n-gram 分析（bigram + trigram）检测重复步骤序列，惩罚重复模式。 | `1.0 - penalty`，penalty 与重复步骤数成正比 |
 | **token_efficiency** | Token 使用效率。无 `--baseline-tokens` 时比较有效 Token vs 总量（error 步骤的 Token 算浪费）。 | `min(baseline/actual, 1.0)` 或 `productive/total` |
 | **error_recovery** | 错误后恢复能力。对每个 error 步骤，检查后续 `--recovery-window` 步内是否有非 error 步骤。连续错误独立评估——每个 error 各自检查其窗口。 | `recovered/total_errors` |
+| **latency_budget** | 是否在延迟预算内完成。无 `--latency-budget` 时默认通过。 | `min(budget/actual_duration, 1.0)` |
 
 每个指标输出 0.0-1.0 的分数。分数 >= 阈值（默认 0.7）即为通过。
 

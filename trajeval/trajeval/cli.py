@@ -40,6 +40,10 @@ def main():
     "--recovery-window", type=int, default=3,
     help="Steps after an error to check for recovery (default 3)",
 )
+@click.option(
+    "--latency-budget", type=float, default=None,
+    help="Latency budget in milliseconds for speed scoring",
+)
 def eval(
     trace_file: Path,
     fmt: str,
@@ -47,6 +51,7 @@ def eval(
     baseline_tokens: int | None,
     threshold: float,
     recovery_window: int,
+    latency_budget: float | None,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
@@ -59,6 +64,7 @@ def eval(
         expected_steps=expected_steps,
         baseline_tokens=baseline_tokens,
         recovery_window=recovery_window,
+        latency_budget_ms=latency_budget,
         pass_threshold=threshold,
     )
     report = evaluate(trace, config)
@@ -148,6 +154,10 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
     "--recovery-window", type=int, default=3,
     help="Steps after an error to check for recovery (default 3)",
 )
+@click.option(
+    "--latency-budget", type=float, default=None,
+    help="Latency budget in milliseconds for speed scoring",
+)
 def compare(
     baseline_file: Path,
     current_file: Path,
@@ -157,6 +167,7 @@ def compare(
     baseline_tokens: int | None,
     threshold: float,
     recovery_window: int,
+    latency_budget: float | None,
 ):
     """Compare two traces and detect metric regressions."""
     try:
@@ -170,6 +181,7 @@ def compare(
         expected_steps=expected_steps,
         baseline_tokens=baseline_tokens,
         recovery_window=recovery_window,
+        latency_budget_ms=latency_budget,
         pass_threshold=threshold,
     )
     baseline_report = evaluate(baseline_trace, config)

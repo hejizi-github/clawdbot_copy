@@ -29,6 +29,7 @@ class MetricConfig(BaseModel):
     loop_ngram_sizes: list[int] = Field(default=[2, 3])
     loop_min_repeats: int = 2
     recovery_window: int = 3
+    latency_budget_ms: float | None = None
     pass_threshold: float = 0.7
 
 
@@ -258,6 +259,38 @@ def token_efficiency(
     )
 
 
+def latency_budget(trace: AgentTrace, budget_ms: float | None = None) -> MetricResult:
+    """Measure whether the agent completed within a latency budget."""
+    actual = trace.total_duration_ms
+    if actual == 0:
+        return MetricResult(
+            name="latency_budget",
+            score=1.0,
+            passed=True,
+            details={"total_duration_ms": 0, "mode": "no_duration"},
+        )
+
+    if budget_ms is None or budget_ms <= 0:
+        return MetricResult(
+            name="latency_budget",
+            score=1.0,
+            passed=True,
+            details={"total_duration_ms": actual, "mode": "no_budget"},
+        )
+
+    score = min(budget_ms / actual, 1.0)
+    return MetricResult(
+        name="latency_budget",
+        score=round(score, 4),
+        passed=score >= 0.7,
+        details={
+            "total_duration_ms": actual,
+            "budget_ms": budget_ms,
+            "mode": "baseline",
+        },
+    )
+
+
 def evaluate(trace: AgentTrace, config: MetricConfig | None = None) -> EvalReport:
     """Run all deterministic metrics and return a combined report."""
     if config is None:
@@ -273,6 +306,7 @@ def evaluate(trace: AgentTrace, config: MetricConfig | None = None) -> EvalRepor
         ),
         token_efficiency(trace, baseline_tokens=config.baseline_tokens),
         error_recovery(trace, recovery_window=config.recovery_window),
+        latency_budget(trace, budget_ms=config.latency_budget_ms),
     ]
 
     threshold = config.pass_threshold

@@ -92,11 +92,11 @@ class TestFullEvalPipeline:
         report = evaluate(trace)
         assert isinstance(report, EvalReport)
         assert report.trace_id == "integration-test-001"
-        assert len(report.metrics) == 5
+        assert len(report.metrics) == 6
         assert 0.0 <= report.overall_score <= 1.0
 
         metric_names = {m.name for m in report.metrics}
-        assert metric_names == {"step_efficiency", "tool_accuracy", "loop_detection", "token_efficiency", "error_recovery"}
+        assert metric_names == {"step_efficiency", "tool_accuracy", "loop_detection", "token_efficiency", "error_recovery", "latency_budget"}
 
     def test_ingest_and_evaluate_from_file(self):
         trace = ingest_json(FIXTURES_DIR / "simple_trace.json")
@@ -530,7 +530,7 @@ class TestBoundaryScenarios:
 
         report = evaluate(trace)
         assert report.overall_score > 0
-        assert len(report.metrics) == 5
+        assert len(report.metrics) == 6
 
     def test_all_error_steps_eval(self):
         trace = ingest_json(self.ALL_ERRORS_TRACE)
@@ -570,7 +570,7 @@ class TestBoundaryScenarios:
 
         assert elapsed < 1.0
         assert trace.step_count == 60
-        assert len(report.metrics) == 5
+        assert len(report.metrics) == 6
         assert 0.0 <= report.overall_score <= 1.0
 
     def test_large_trace_judge_prompt_building(self):

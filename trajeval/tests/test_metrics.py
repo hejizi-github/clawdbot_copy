@@ -8,6 +8,7 @@ from trajeval.metrics import (
     MetricConfig,
     error_recovery,
     evaluate,
+    latency_budget,
     loop_detection,
     step_efficiency,
     token_efficiency,
@@ -213,13 +214,65 @@ class TestTokenEfficiency:
         assert result.details["error_tokens"] == 150
 
 
+class TestLatencyBudget:
+    def test_no_duration(self):
+        trace = AgentTrace(trace_id="lb1")
+        result = latency_budget(trace)
+        assert result.score == 1.0
+        assert result.details["mode"] == "no_duration"
+
+    def test_no_budget(self):
+        trace = AgentTrace(trace_id="lb2", total_duration_ms=5000.0)
+        result = latency_budget(trace)
+        assert result.score == 1.0
+        assert result.details["mode"] == "no_budget"
+
+    def test_under_budget(self):
+        trace = AgentTrace(trace_id="lb3", total_duration_ms=500.0)
+        result = latency_budget(trace, budget_ms=1000.0)
+        assert result.score == 1.0
+        assert result.details["mode"] == "baseline"
+        assert result.details["budget_ms"] == 1000.0
+
+    def test_over_budget(self):
+        trace = AgentTrace(trace_id="lb4", total_duration_ms=2000.0)
+        result = latency_budget(trace, budget_ms=1000.0)
+        assert result.score == 0.5
+        assert result.passed is False
+        assert result.details["total_duration_ms"] == 2000.0
+
+    def test_exactly_on_budget(self):
+        trace = AgentTrace(trace_id="lb5", total_duration_ms=1000.0)
+        result = latency_budget(trace, budget_ms=1000.0)
+        assert result.score == 1.0
+        assert result.passed is True
+
+    def test_way_over_budget(self):
+        trace = AgentTrace(trace_id="lb6", total_duration_ms=10000.0)
+        result = latency_budget(trace, budget_ms=1000.0)
+        assert result.score == 0.1
+        assert result.passed is False
+
+    def test_negative_budget_treated_as_no_budget(self):
+        trace = AgentTrace(trace_id="lb7", total_duration_ms=5000.0)
+        result = latency_budget(trace, budget_ms=-100.0)
+        assert result.score == 1.0
+        assert result.details["mode"] == "no_budget"
+
+    def test_zero_budget_treated_as_no_budget(self):
+        trace = AgentTrace(trace_id="lb8", total_duration_ms=5000.0)
+        result = latency_budget(trace, budget_ms=0.0)
+        assert result.score == 1.0
+        assert result.details["mode"] == "no_budget"
+
+
 class TestEvaluate:
     def test_simple_trace(self, simple_trace_path):
         trace = ingest_json(simple_trace_path)
         report = evaluate(trace)
         assert isinstance(report, EvalReport)
         assert report.trace_id == "test-trace-001"
-        assert len(report.metrics) == 5
+        assert len(report.metrics) == 6
         assert report.overall_score > 0.0
 
     def test_all_pass(self, simple_trace_path):
@@ -481,3 +534,36 @@ class TestErrorRecovery:
     def test_config_recovery_window_default_is_three(self):
         config = MetricConfig()
         assert config.recovery_window == 3
+
+    def test_evaluate_includes_latency_budget(self):
+        trace = AgentTrace(
+            trace_id="lb_eval1",
+            steps=[TraceStep(type="llm_call", name="m1")],
+            total_duration_ms=1000.0,
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        report = evaluate(trace)
+        metric_names = {m.name for m in report.metrics}
+        assert "latency_budget" in metric_names
+
+    def test_config_latency_budget_flows_through_evaluate(self):
+        trace = AgentTrace(
+            trace_id="lb_eval2",
+            steps=[TraceStep(type="llm_call", name="m1")],
+            total_duration_ms=2000.0,
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        tight = MetricConfig(latency_budget_ms=1000.0)
+        generous = MetricConfig(latency_budget_ms=5000.0)
+        tight_report = evaluate(trace, tight)
+        generous_report = evaluate(trace, generous)
+        tight_m = next(m for m in tight_report.metrics if m.name == "latency_budget")
+        generous_m = next(m for m in generous_report.metrics if m.name == "latency_budget")
+        assert tight_m.details["budget_ms"] == 1000.0
+        assert generous_m.details["budget_ms"] == 5000.0
+        assert tight_m.score == 0.5
+        assert generous_m.score == 1.0
+
+    def test_config_latency_budget_default_is_none(self):
+        config = MetricConfig()
+        assert config.latency_budget_ms is None

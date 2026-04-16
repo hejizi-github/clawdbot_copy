@@ -96,6 +96,39 @@ class TestEvalCommand:
         assert wide_recovery["details"]["recovery_window"] == 5
         assert wide_recovery["details"]["recovered"] >= narrow_recovery["details"]["recovered"]
 
+    def test_latency_budget_flag_changes_output(self):
+        runner = CliRunner()
+        tight = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1", "--latency-budget", "500",
+        ])
+        generous = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1", "--latency-budget", "50000",
+        ])
+        tight_data = json.loads(tight.output)
+        generous_data = json.loads(generous.output)
+        tight_lb = next(
+            m for m in tight_data["metrics"] if m["name"] == "latency_budget"
+        )
+        generous_lb = next(
+            m for m in generous_data["metrics"] if m["name"] == "latency_budget"
+        )
+        assert tight_lb["details"]["budget_ms"] == 500.0
+        assert generous_lb["details"]["budget_ms"] == 50000.0
+        assert generous_lb["score"] >= tight_lb["score"]
+
+    def test_latency_budget_default_no_budget(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        data = json.loads(result.output)
+        lb = next(m for m in data["metrics"] if m["name"] == "latency_budget")
+        assert lb["details"]["mode"] == "no_budget"
+        assert lb["score"] == 1.0
+
 
 class TestJudgeCommand:
     def _mock_judge_result(self, trace_id: str, score: float) -> JudgeResult:
@@ -220,15 +253,31 @@ class TestCompareCommand:
         assert data["has_regression"] is False
         assert lenient.exit_code == 0
 
-    def test_recovery_window_flag_accepted(self):
+    def test_recovery_window_flag_flows_through(self):
         trace = str(FIXTURES_DIR / "recovery_trace.json")
         runner = CliRunner()
+        narrow = runner.invoke(main, [
+            "compare", trace, trace, "--format", "json", "--recovery-window", "1",
+        ])
+        wide = runner.invoke(main, [
+            "compare", trace, trace, "--format", "json", "--recovery-window", "5",
+        ])
+        assert narrow.exit_code == 0
+        assert wide.exit_code == 0
+
+    def test_latency_budget_flag_flows_through(self):
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", trace, trace, "--format", "json", "--recovery-window", "2",
+            "compare", trace, trace, "--format", "json", "--latency-budget", "500",
         ])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert "metric_deltas" in data
+        lb_delta = next(
+            d for d in data["metric_deltas"] if d["name"] == "latency_budget"
+        )
+        assert lb_delta is not None
 
 
 class TestAnnotateCommand:
