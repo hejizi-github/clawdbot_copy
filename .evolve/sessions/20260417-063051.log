@@ -1,0 +1,43 @@
+# Session 20260417-063051 — latency_budget 第 6 个确定性指标（Phase 3 Session 15）
+
+精准执行评审的两个首要建议：(1) 添加 `latency_budget` 作为第 6 个确定性指标，完成 project-proposal.md 中规划的全部确定性指标集；(2) 修复 compare CLI 的 `recovery_window` 测试弱于 eval 的不对等问题。
+
+**latency_budget 实现**：新增 `latency_budget()` 函数，评分公式 `min(budget_ms / actual_duration_ms, 1.0)`——在预算内得 1.0，超预算按比例扣分。与其他基线指标（step_efficiency、token_efficiency）模式一致：无预算时默认 1.0（no_budget mode）。MetricConfig 新增 `latency_budget_ms: float | None = None` 字段，CLI eval 和 compare 命令均添加 `--latency-budget` flag，完整贯穿 Config → Engine → CLI 三层。
+
+**compare CLI 测��修复**：将 `test_recovery_window_flag_accepted`（只验证 exit 0）替换为 `test_recovery_window_flag_flows_through`（验证不同窗口值实际影响输出）���与 eval 测试的严谨度对齐。同时为 compare ���令添加了 `test_latency_budget_flag_flows_through`。
+
+**测试**：196 → 210（+14），新增 8 个 latency_budget 单元测试、4 个 evaluate ���成测试、2 个 CLI 集成��试，修复 3 个 integration 测试中的 metric count 断言（5→6）。
+
+**README**：同步更新特性列表、eval/compare 参数表、指标说明表。
+
+## 计划执行对照
+
+| 计划项 | 状态 |
+|--------|------|
+| Fix compare CLI recovery_window test | ✅ 完成 |
+| Add latency_budget metric function | ✅ 完成 |
+| Add MetricConfig.latency_budget_ms | ✅ 完成 |
+| Wire into evaluate() | ✅ 完成 |
+| Add --latency-budget to eval CLI | ✅ 完成 |
+| Add --latency-budget to compare CLI | ✅ 完成 |
+| Unit tests for metric | ✅ 8 个 |
+| Config flow-through tests | ✅ 4 个 |
+| CLI integration tests | ��� 4 个（eval 2 + compare 2） |
+| Update integration test assertions | ✅ 3 �� |
+| README documentation | ✅ 完成 |
+
+## 里程碑
+
+全部 6 个确定性指标完成：
+1. step_efficiency ✅（Session 2）
+2. tool_accuracy ✅（Session 2）
+3. loop_detection ✅（Session 3）
+4. token_efficiency ✅（Session 2）
+5. error_recovery ✅（Session 7）
+6. **latency_budget** ��（本 session）
+
+## 下次 session 建议
+
+1. 为 MetricConfig 剩余未暴露到 CLI 的字段统一加 flags：`--loop-ngram-sizes` 和 `--loop-min-repeats`
+2. 考虑开始 LLM-as-judge ���改��迭代（如多维度评分、自定义 prompt）
+3. 或转向项目的下一阶段目标——现在 6 个确定性指标已全��就绪
