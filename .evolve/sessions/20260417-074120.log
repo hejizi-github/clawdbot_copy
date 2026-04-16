@@ -1,0 +1,17 @@
+## Session Summary
+
+**Phase 3 Session 23 — CI output format + review fixes**
+
+**Done:**
+1. Fixed 2 review issues from last session:
+   - `_aggregate_dimensions` type signature: `str` → `Literal["median", "mean"]` (type consistency)
+   - Added warning when `--judges 1 --aggregation mean` (UX: parameter silently ignored)
+
+2. New feature: `--format ci` for `eval` and `compare` commands
+   - GitHub Actions annotations (`::error::`/`::warning::`/`::notice::`) per metric
+   - Markdown summary table for PR annotations / job summaries
+   - Three-tier annotation levels: error (failed), warning (borderline <0.85), notice (solid pass)
+
+**Metrics:** 273 → 296 tests (+23), all passing. Committed and pushed.
+
+**Next:** Could extend CI format to `judge` command, or move to deterministic metrics enhancement (loop detection n-gram optimization, token efficiency baseline auto-inference).
