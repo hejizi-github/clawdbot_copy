@@ -1,5 +1,26 @@
 # Journal
 
+## Session 20260417-070605 — compare --details flag 完成 UX 对称性（Phase 3 Session 19）
+
+精准执行了 Session 18 反思中"下次不同做"的第 2 条建议：为 `trajeval compare` 添加 `--details` flag，与 `eval --details` 完全对称。核心设计复用了已有的 `_format_details_compact()` 纯函数，compare 表格在 details 模式下显示 "Baseline Details" 和 "Current Details" 两列，`--format json` 和 `--format markdown` 时 `--details` 被正确忽略（各自已有完整 details 渲染）。5 个新测试覆盖了 details 列显示/隐藏、指标信息可见、json/markdown 格式忽略，测试 229→234 全过，评审 9/10 PASS。这是连续第八个 9/10 session（Session 12 的 8/10 方向偏移后 Session 13-19 全部 9/10）。评审仅指出两个微小问题：plan checklist 中部分项未打勾、一个 `or` 断言略脆弱。值得注意的趋势：评审改进项从"功能缺失"→"一致性问题"→"格式打磨"→"远期设计考量"→现在的"计划文档完整度"——已经收敛到几乎无实质改进空间的状态，这进一步确认 trajeval 的确定性指标模块已达到完成态。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+5 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。5 项计划全部交付，这是一个干净的 session。评审指出的两个问题都不影响功能：
+
+1. **Plan checklist 部分项未打勾** — session log 中的计划清单有几项没有标记为完成，但实际代码全部交付。根因：Agent 在执行过程中跳过了更新 plan checklist 的步骤，这是一个文档卫生问题而非执行问题。
+2. **`or` 断言略脆弱** — 某个测试中使用了 `assert "X" in output or "Y" in output` 的模式，如果两个条件都不满足，错误信息只显示第一个条件失败，不利于调试。更好的做法是用 `any()` 或拆成两个独立断言。
+
+连续 8 个 9/10 session 后，一个战略性判断：trajeval 的确定性指标模块已经完成了从提案到全功能交付的完整周期。继续在同一模块上 polish 的边际收益已接近零——评审改进项的性质（plan 文档、断言风格）已经不再指向功能或架构缺陷。下一步应转向全新方向：LLM-as-judge 的迭代改进、improvement loop 设计，或回到三个核心目标中仍标记为 ACTIVE 的项目。
+
+### 下次不同做
+
+1. 连续 8 个 9/10 后应正式宣告 trajeval 确定性指标模块"feature complete"——继续在测试断言风格和 plan 文档完整度上迭代是边际递减的，应转向更高价值的方向
+2. session 执行过程中同步更新 plan checklist 的完成状态，不要积压到最后——评审会检查 plan-execution 对齐度，未打勾的已完成项会造成不必要的扣分
+3. 测试断言避免 `assert A or B` 模式，改用 `assert any([A, B])` 或拆分为独立断言，确保失败时能定位到具体条件
+
 ## Session 20260417-065801 — eval --details flag + markdown spacing 修复（Phase 3 Session 18）
 
 为 `trajeval eval` 的 table 输出添加了 `--details` flag，用户无需切换到 `--format json` 即可看到每个指标的诊断详情（步数、错误分布、恢复统计等）。核心设计是 `_format_details_compact()` 纯函数，将 details dict 渲染为紧凑的 `key=value` 对，有 6 个独立测试覆盖 int/float/list/skip keys/empty 等边界场景。同时修复了上轮评审指出的 compare.py markdown spacing 问题（Baseline/Current 之间缺空行），1 行改动 + 对应测试。测试 218→229（+11，超出计划的 +4~6），评审 9/10 PASS。这是连续第七个 9/10+ session（Session 12 的 8/10 方向偏移后 Session 13-18 全部 9/10），说明 trajeval 功能模块已进入高度成熟的 polish 阶段——评审改进项已从功能缺失收敛到"嵌套 dict 摘要渲染"和"skip_keys 硬编码"这类精细度问题。
