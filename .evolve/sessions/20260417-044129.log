@@ -1,0 +1,25 @@
+# Session 20260417-044129 — LLM-as-Judge Scorer
+
+## What was done
+Implemented `trajeval/trajeval/scorer.py` — the LLM-as-judge scoring module, which is trajeval's core differentiator from pure rule-based eval tools (proposal Session 3).
+
+### Key design decisions
+1. **Dependency injection for the client** — `judge(trace, config, client=None)` accepts an optional `anthropic.Anthropic` client. This enables clean mock-based testing and lets users pass pre-configured clients (custom base_url, timeouts, etc.).
+2. **Prompt caching** — The system prompt (rubric) uses `cache_control: {"type": "ephemeral"}` so repeated evaluations within the Anthropic cache TTL don't re-process the rubric.
+3. **Graceful degradation** — If `anthropic` isn't installed, `judge()` returns a `JudgeResult` with a helpful error message instead of crashing. The package is an optional dependency (`pip install trajeval[judge]`).
+4. **Score normalization** — 0-5 rubric scores are normalized to 0-1 to be comparable with deterministic metric scores.
+5. **Extensible dimensions** — `DIMENSION_PROMPTS` dict makes it trivial to add new evaluation dimensions later (e.g., harm_avoidance, tool_use_appropriateness).
+
+### Files changed
+- **New**: `trajeval/trajeval/scorer.py` — JudgeConfig, JudgeResult, build_user_prompt(), judge()
+- **New**: `trajeval/tests/test_scorer.py` — 23 mock-based tests (6 prompt, 5 parse, 5 normalize, 7 judge)
+- **Modified**: `trajeval/trajeval/cli.py` — Added `judge` subcommand with table/json output
+
+### Verification
+- 70 tests pass (47 existing + 23 new)
+- ruff: 0 warnings
+- No real API calls in test suite
+
+## What's next
+- Session 4 (proposal): Comparison + regression detection (`trajeval compare`)
+- Alternative: Try a real LLM judge evaluation with an actual trace to validate the prompt quality
