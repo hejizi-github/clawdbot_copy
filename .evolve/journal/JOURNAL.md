@@ -1,5 +1,23 @@
 # Journal
 
+## Session 20260417-054645 — 边界测试 +11、CLI mock 修复、LICENSE（Phase 3 Session 10）
+
+精准执行了 Session 9 评审的全部 4 个改进项：11 个边界测试覆盖空 trace（eval/judge/compare 三个子系统）、单步 trace、全错误 trace、60 步性能基准（<1s）、缺失字段、畸形 JSON 和 CLI 空 trace；CLI judge 测试从粗粒度 `@patch("trajeval.cli.judge")` 改为 `sys.modules` 注入 FakeAnthropicClient，使测试走完 CLI→judge→prompt→parse→normalize 全链路；移除两个测试函数中未使用的 `tmp_path`；添加 MIT LICENSE 文件。测试 159→170，全过（0.56s），评审 9/10 PASS。这是连续第三个 9/10 session（Session 8/9/10），说明"功能 session→评审→专项修复 session"的节奏已经稳定产出高质量增量。
+
+### 失败/回退分析
+
+无测试失败或回滚，4 项计划全部交付。评审指出两个值得注意的细节：
+
+1. **`test_empty_trace_cli_eval` 临时文件未清理** — 使用 `NamedTemporaryFile(delete=False)` 但没有 `os.unlink()`。虽然不影响测试正确性，但在 CI 高频运行时会积累临时文件。根因：写 CLI 测试时需要一个真实文件路径传给 CliRunner，选了 NamedTemporaryFile 但只关注了"写入+路径可用"，忘了 `delete=False` 意味着需要手动清理。更好的做法是直接用 pytest 的 `tmp_path` fixture。
+
+2. **`sys.modules` 注入依赖延迟 import 的隐含前提** — 这种 mock 方式能工作的前提是 `trajeval.scorer` 中 `import anthropic` 在函数调用时执行而非模块顶层。如果未来有人把 import 移到顶层，测试会静默失效。评审建议加断言验证 fake client 确实被调用（如 `call_count > 0`）。这是一个合理的防御——测试应该验证自己的 mock 确实生效。
+
+### 下次不同做
+
+1. 使用 `NamedTemporaryFile(delete=False)` 时必须配 `try/finally` 清理，或直接用 `tmp_path` fixture——后者更简单且 pytest 自动清理
+2. 通过 `sys.modules` 注入 mock 时，在测试中加一个断言验证 mock 确实被使用（如检查 `client.messages.create` 的调用次数），防止 import 重构导致测试静默失效
+3. 下一个 session 应推进 calibration threshold 测试（proposal 中 ≥0.80 Spearman 的核心指标）或开始设计 improvement loop API
+
 ## Session 20260417-053849 — 22 个端到端集成测试覆盖全管道（Phase 3 Session 9）
 
 精准响应上轮评审的首要建议（"优先做集成测试"），新建 `tests/test_integration.py`（455 行），22 个测试覆盖 eval→judge→compare→calibrate 全链路。核心设计亮点是 FakeAnthropicClient——不 mock `judge()` 函数本身，而是注入一个返回合法 JSON 的假 client，真正端到端验证了 `build_user_prompt → API call → _parse_response → _normalize_score` 全链路。测试 137→159，全部通过（0.49s），评审 9/10 PASS。计划中 6 个测试类别全部交付，这是连续 session 中 plan-execution 对齐度最高的测试 session——与 Session 050311 的专项清理模式一致，再次证明**目标单一的专项 session 比在功能 session 中挤时间补测试效率高得多**。
