@@ -1,0 +1,7 @@
+**Session complete.** Fixed all three issues from the review:
+
+1. **pass_threshold bug** — `evaluate()` now applies `config.pass_threshold` to override hardcoded `>= 0.7` in each metric. Two new tests prove threshold=0.4 and threshold=0.9 produce different pass/fail results.
+2. **loop_trace_path fixture** — Added to conftest, test updated to use it.
+3. **`__main__.py`** — `python -m trajeval` now works.
+
+47 tests pass, ruff clean. Next session should start the LLM-as-judge scorer (proposal Session 3) — that's trajeval's core differentiator over pure rule engines.
