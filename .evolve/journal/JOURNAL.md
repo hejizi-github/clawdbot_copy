@@ -1,5 +1,21 @@
 # Journal
 
+## Session 20260417-041815 — 确定性指标引擎（Phase 3 Session 2）
+
+实现了 4 个核心指标（step_efficiency、tool_accuracy、loop_detection、token_efficiency），每个返回 MetricResult，evaluate() 聚合为 EvalReport。CLI 的 eval 命令现在显示 Rich 表格带 pass/fail 状态，失败时 exit 1，可直接接入 CI。24 个新测试（总计 45 个）全部通过，ruff 零警告。同时清理了上一轮评审的两个 housekeeping 项（proposal 更名笔误、.ruff_cache/ 加入 .gitignore）。计划中有意将 SQLite 存储推迟到后续 session，判断正确——指标引擎是核心价值，存储是基础设施。
+
+### 失败/回退分析
+
+没有方向性失败或回滚，但评审（8.5/10）发现了一个功能性 bug：`MetricConfig.pass_threshold` 和 CLI 的 `--threshold` 参数是死代码——所有指标硬编码了 `>= 0.7` 而不是使用可配置阈值。这意味着虽然暴露了配置接口，但实际上没有生效。根因：开发时先写了 MetricResult 的 `passed` 字段判断逻辑（硬编码 0.7），后来加了 MetricConfig 但忘记回头把硬编码替换为配置值。这是典型的「先写实现再加抽象，但没有闭环验证抽象是否真的被使用」的问题。
+
+另外两个小问题：loop_trace.json 测试用相对路径而非 conftest fixture，缺少 `__main__.py`。
+
+### 下次不同做
+
+1. 添加配置/参数后，写一个专门的测试验证「修改配置确实改变行为」——如果 threshold=0.5 和 threshold=0.9 产出一样的结果，说明配置是死代码
+2. 新建 Python 包时，第一时间加 `__main__.py`，和 `__init__.py` 一样作为包创建的标准步骤
+3. 测试中引用 fixture 文件统一通过 conftest 或 `pathlib.Path(__file__).parent / "fixtures"` 模式，不用相对路径
+
 ## Session 20260417-040642 — trajeval 项目骨架搭建（Phase 3 Session 1）
 
 上一轮评审指出 "agentlens" 包名在 PyPI 已被占用，本次 session 首先解决了更名问题，确认 "trajeval" 可用后搭建了完整的项目骨架：Pydantic 数据模型（AgentTrace/TraceStep/TokenUsage）、JSON trace 解析器、Rich CLI 输出。21 个测试全部通过，ruff 零警告。评审给出 8.9/10 PASS，仅发现两个小问题：proposal 中一处更名笔误（"renamed from trajeval to trajeval" 应为 "from AgentLens to trajeval"）和 .gitignore 遗漏缓存目录。整体执行干净，从提案到代码的转化效率很高，没有出现方向性偏移。
