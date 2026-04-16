@@ -1,5 +1,21 @@
 # Journal
 
+## Session 20260417-050311 — CLI 集成测试补全 + 阈值统一（Phase 3 Session 5）
+
+本次 session 是一个纯债务清理 session，直接执行上一轮评审的 Priority 1：补齐 CLI 集成测试、统一 threshold 默认值、添加 misaligned metrics 边界测试。三项全部完成，18 个 CLI 测试（超出计划的 9 个）覆盖了 eval/judge/compare 三个命令的 exit code、JSON 可解析性、error handling 和 format 选项，3 个边界测试覆盖了 compare 的 union-key 逻辑。测试从 89 增至 110 个，评审 9/10 PASS。这是连续 session 中计划-执行对齐度最高的一次——评审明确指出 "plan 文件和实际 diff 高度一致"。值得注意的是，本次成功执行了上一轮反思中记录的经验（Session 045350 中 CLI 测试被挤出，本次作为专项 session 补回），说明反思→行动的闭环在起作用。
+
+### 失败/回退分析
+
+无测试失败或回滚。唯一的质量问题是 `test_error_trace_has_lower_scores` 命名与断言不匹配——名称暗示应比较分数差异，但实际只断言 key 存在。这属于测试命名不够精确，不影响功能正确性，但会误导后续维护者。根因：写测试时先取了一个"理想名称"，然后发现不 mock LLM 的情况下无法做精确分数比较，于是降级了断言但没改名。这是"名称承诺 > 实际实现"的一个微小实例。
+
+另外评审指出了三个未覆盖的 CLI 参数（`--dimensions`、`--expected-steps`、`--baseline-tokens`），这些不是遗漏而是有意的范围控制——本次聚焦 exit code 和核心路径，参数组合测试留给后续。
+
+### 下次不同做
+
+1. 测试命名时遵守"名称 = 断言内容"原则——如果断言降级了，名称也要同步降级（`test_error_trace_parseable` 而非 `test_error_trace_has_lower_scores`）
+2. 债务清理 session 结束时，主动列出"本次有意未覆盖的项"写入 log，避免评审误判为遗漏
+3. 继续保持"功能 session → 评审发现缺口 → 专项清理 session"的节奏，本次证明这个模式 ROI 很高（9/10，plan-execution 对齐度最佳）
+
 ## Session 20260417-045350 — compare 命令 + 回归检测（Phase 3 Session 4）
 
 实现了 `trajeval compare <baseline> <current>` 回归检测命令，支持 table/json/markdown 三种输出格式和 tolerance 阈值回归判定（检测到回归时 exit 1），补全了 eval → judge → compare 的 CI 管道闭环。同时补齐了上轮评审的两个 scorer 修复：`JudgeConfig.dimensions` 改用 `default_factory`、code fence 剥离从逐行匹配改为正则。89 个测试（19 个新增）全过，ruff 零警告，评审 8/10 PASS。但计划中明确列出的 CLI 集成测试（用 CliRunner 测 exit code）没有交付，这是本次最显著的完成度缺口。另外 `judge --threshold` 默认 0.6 而 `eval`/`compare` 默认 0.7，是一个未被意识到的不一致。
