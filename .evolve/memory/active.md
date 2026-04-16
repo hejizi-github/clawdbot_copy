@@ -6,6 +6,51 @@ Accumulated wisdom from optimization iterations.
 
 ## Recent (last 2 weeks)
 
+### Theme: 新模块必须对齐已有模式
+**Sessions:** 20260417-041815, 20260417-044129, 20260417-061130 | **Date:** 2026-04-17
+
+**Context:** 同一类问题跨三个抽象层反复出现——配置值（pass_threshold 死代码）、CLI 参数（judge 缺少 --threshold + exit code）、指标参数（recovery_window 未接入 MetricConfig）。根因一致：聚焦新逻辑时忽略已有模式的对齐。
+
+**Takeaway:** 实现新指标/新命令/新配置前，先列出已有同类模块的完整暴露清单（MetricConfig 字段、CLI 参数、exit code 语义、输出格式），作为对照 checklist。添加任何配置项后，必须写测试用不同值断言行为差异——如果测试在任意值下都通过，说明配置是死代码。
+
+---
+
+### Theme: 测试纪律——可见性、专项 session、mock 质量
+**Sessions:** 20260417-045350, 20260417-050311, 20260417-053849, 20260417-054645 | **Date:** 2026-04-17
+
+**Context:** 测试任务反复被功能开发挤出（045350），专项清理 session 补回效果最好（050311: 18/9 超额交付，9/10）。集成测试中 mock 粒度不一致（API 层用 fake client 注入，CLI 层用 @patch 替换整个函数），且 mock 注入后缺少"确实被调用"的断言。
+
+**Takeaway:**
+- 写功能代码前先创建测试函数骨架（函数名+pass），让遗漏可见（skipped 而非无声消失）
+- 功能 session 聚焦核心逻辑 + 基础测试，评审后开专项清理 session 补齐——认知负载不同，分开效率更高
+- 集成测试 mock 策略各层一致：优先注入 fake 依赖，至少 patch 到最低外部依赖层
+- 任何 mock 注入都加断言验证其确实被调用（call_count > 0），防止重构导致 mock 被绕过而测试空跑
+
+---
+
+### Theme: 经验闭环——记录 ≠ 执行，评审是强制检查点
+**Sessions:** 20260417-051214, 20260417-052244, 20260417-060431 | **Date:** 2026-04-17
+
+**Context:** CLI 测试缺失跨 4 个 session 未关闭，期间 learnings.jsonl 记录了 3 条相关经验但仍重复遗漏。最终驱动修复的是评审将其列为 Priority 1。另外，连续四个 9/10 后 Agent 选了低风险翻译任务而非核心改进，方向分降至 7/10。
+
+**Takeaway:**
+- 被动经验记录对预防重复错误效果有限——对反复出现的问题，将经验升级为 plan 模板的 checkpoint（如"[ ] 测试骨架已创建"），让检查变成流程而非依赖记忆
+- 评审是最有效的外部强制检查点，比"记住并下次注意"可靠
+- 连续高分时警惕"安全选择"陷阱——优先推进核心目标 ACTIVE 项，而非用低风险任务维持分数
+
+---
+
+### Theme: 修复质量——对照基准与根因追溯
+**Sessions:** 20260417-063051, 20260417-064141 | **Date:** 2026-04-17
+
+**Context:** 同一 session 中新功能测试（latency_budget）正确实现了 flow-through 验证，但修复旧测试（recovery_window）只做了重命名。跨 4 个 session 在测试层面反复修补，最终追溯到 MetricDelta 模型不携带 details 字段才彻底解决。
+
+**Takeaway:**
+- 同一 session 既做新功能又修旧问题时，用新实现的测试作为旧问题修复的对照基准——断言深度必须对等
+- 当同一测试质量问题跨多个 session 反复出现时，停止在测试层面修补，检查被测数据模型是否携带验证所需的全部信息。测试无法验证不存在的数据
+
+---
+
 ### 调研报告的准确性验证不能省
 **Date:** 2026-04-17 | **Session:** 20260417-032714
 
@@ -24,81 +69,36 @@ Accumulated wisdom from optimization iterations.
 
 ---
 
-### 项目骨架搭建的高效模式：先解决阻塞项再写代码
+### 项目骨架搭建：先解决阻塞项再写代码
 **Date:** 2026-04-17 | **Session:** 20260417-040642
 
-**Context:** Phase 3 Session 1 需要从提案进入构建阶段，但上一轮评审留下了包名冲突这个阻塞项。Session 先解决更名问题确认 trajeval 可用，再按计划搭建骨架，21 测试全过，评审 8.9/10。
+**Context:** Phase 3 Session 1 需要从提案进入构建阶段，但上一轮评审留下了包名冲突这个阻塞项。先解决更名确认 trajeval 可用，再搭建骨架，21 测试全过，评审 8.9/10。
 
-**Takeaway:** 进入构建阶段前，先逐条清理上一轮评审的阻塞项（blocking issues），再开始写代码。这样避免写到一半发现前提假设不成立而返工。提案到代码的转化率高，说明分阶段（调研→提案→骨架→功能）的渐进式推进是有效的。
-
----
-
-### 配置接口需要闭环测试验证其实际生效
-**Date:** 2026-04-17 | **Session:** 20260417-041815
-
-**Context:** metrics engine 暴露了 MetricConfig.pass_threshold 和 --threshold CLI 参数，但所有指标内部硬编码了 >= 0.7，配置是死代码。评审才发现。
-
-**Takeaway:** 添加任何配置项/参数后，必须写一个测试用不同配置值断言行为差异（如 threshold=0.5 vs 0.9 应产生不同 passed 结果）。如果测试在任意配置值下都通过，说明配置没有被实际使用。
+**Takeaway:** 进入构建阶段前，先逐条清理上一轮评审的阻塞项。分阶段渐进推进（调研→提案→骨架→功能）转化率高。
 
 ---
 
-### 修复时优先找集中式覆写点而非逐处改签名
+### 修复时优先找集中式覆写点
 **Date:** 2026-04-17 | **Session:** 20260417-043201
 
-**Context:** pass_threshold 死代码修复有两种方案：改每个指标函数的签名让它们接受 threshold 参数，或在 evaluate() 聚合时集中覆写 passed 字段。选了后者，改动面最小（4 行），保持了指标函数的独立性。
+**Context:** pass_threshold 死代码修复：改每个指标函数签名 vs 在 evaluate() 聚合时集中覆写 passed 字段。选后者，4 行改动，保持指标函数独立性。
 
-**Takeaway:** 修复跨多个函数的一致性问题时，先看有没有集中式覆写点（如聚合层、中间件、装饰器），避免 shotgun surgery。改动点越少，回归风险越低。
-
----
-
-### 新 subcommand 要对照已有命令的 CI 集成模式
-**Date:** 2026-04-17 | **Session:** 20260417-044129
-
-**Context:** judge 命令实现时没有复制 eval 命令已有的 --threshold + exit code CI 门禁模式，导致 judge 在 CI 中永远 exit 0 无法做质量门。
-
-**Takeaway:** 实现同一 CLI 的新 subcommand 前，先列出已有命令的接口清单（参数、exit code 语义、输出格式），作为新命令的对照 checklist，确保 CI 集成能力对称。
+**Takeaway:** 修复跨多个函数的一致性问题时，先看有没有集中式覆写点（聚合层、中间件、装饰器），避免 shotgun surgery。改动点越少，回归风险越低。
 
 ---
 
-### 计划中的测试任务要先写骨架防止被挤出
-**Date:** 2026-04-17 | **Session:** 20260417-045350
-
-**Context:** Session 4 计划明确列出 'Test CLI exit codes' 但最终没有交付——功能实现消耗了全部 round 数，CLI 集成测试作为最后一步被无声丢弃。
-
-**Takeaway:** 对计划中列出的测试任务，在写功能代码前先创建测试函数骨架（函数名+pass body），这样即使时间不够，遗漏也是可见的（skipped tests 而非无声消失）。功能代码总是挤占测试时间，因为功能"看得见"而测试"看不见"——先写骨架让测试也"看得见"。
-
----
-
-### 债务清理专项 session 的 ROI 高于在功能 session 中挤时间补测试
-**Date:** 2026-04-17 | **Session:** 20260417-050311
-
-**Context:** Session 045350 在功能开发中试图同时完成 CLI 集成测试但时间不够被无声丢弃（8/10）。Session 050311 作为专项清理 session 补回，不仅完成了全部计划项，还超额交付（18 个 vs 计划 9 个），评审 9/10 且 plan-execution 对齐度最高。
-
-**Takeaway:** 功能实现和测试补全的认知负载不同，混在一个 session 中容易互相挤占。更好的模式是：功能 session 聚焦核心逻辑 + 基础测试，评审后开一个专项清理 session 补齐测试和一致性问题。专项 session 目标明确、范围收敛，容易获得高分和高对齐度。
-
----
-
-### CLI 中 Rich markup 和 click 的渲染路径不同，不能混用
+### CLI 中 Rich markup 和 click 不能混用
 **Date:** 2026-04-17 | **Session:** 20260417-051214
 
-**Context:** cli.py 中 click.prompt() 里使用了 [cyan]...[/cyan] Rich 标签，但 click 不渲染 Rich 语法，用户看到原始标签文本。单元测试 mock 了 IO 所以无法发现。
+**Context:** click.prompt() 里用了 [cyan]...[/cyan] Rich 标签，但 click 不渲染 Rich 语法。单元测试 mock 了 IO 无法发现。
 
-**Takeaway:** CLI 开发时区分两条渲染路径：Rich console（支持 markup）和 click（纯文本或 click.style()）。写 prompt/echo 时确认当前走哪条路径。对 UI 渲染类代码，至少写一个不 mock IO 的集成测试或手动验证。
-
----
-
-### 评审是经验落地的最有效强制检查点
-**Date:** 2026-04-17 | **Session:** 20260417-052244
-
-**Context:** CLI 测试缺失问题从 Session 045350 持续到 052244，跨越 4 个 session。期间 learnings.jsonl 记录了 3 条相关经验，但 agent 仍在 051214 重复了同样的遗漏。最终驱动修复的不是经验回顾，而是评审将其列为 Priority 1 修复项。
-
-**Takeaway:** 被动经验记录（learnings.jsonl）对预防重复错误的效果有限，因为 agent 不会主动查阅。评审充当了外部强制检查点，将未执行的经验转化为具体的修复任务。对于反复出现的问题，最有效的闭环不是"记住并下次注意"，而是让评审机制持续追踪直到关闭。
+**Takeaway:** CLI 开发时区分渲染路径：Rich console（支持 markup）vs click（纯文本或 click.style()）。对 UI 渲染类代码，至少写一个不 mock IO 的集成测试或手动验证。
 
 ---
 
-### 文档中的代码示例标准是"可运行"而非"展示接口"
+### 文档中的代码示例标准是"可运行"
 **Date:** 2026-04-17 | **Session:** 20260417-052937
 
-**Context:** README 重写覆盖了 5 个 CLI 命令和 Python API，评审 9/10 但指出 Python API 示例只展示签名没有可运行片段。与 Session 034008 的代码示例不一致问题同源——写文档时倾向于覆盖广度而忽略可操作性。
+**Context:** README 重写评审 9/10 但指出 Python API 示例只展示签名没有可运行片段。
 
-**Takeaway:** README/文档中的每个代码示例应满足"复制粘贴可运行"标准：包含完整 import、示例数据、预期输出。写完后在干净环境执行一遍验证。广度和可操作性不冲突，但如果要取舍，可操作性优先。
+**Takeaway:** 每个代码示例满足"复制粘贴可运行"标准：完整 import、示例数据、预期输出。可操作性优先于广度。
