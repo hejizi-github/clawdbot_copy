@@ -1,0 +1,10 @@
+**Session 11 complete.** 
+
+Changes made:
+- Added `--threshold` option to `calibrate` CLI command — enables CI quality gates based on Spearman ρ (exit 1 if below threshold). JSON output includes `passed`/`threshold` when set. Without `--threshold`, behavior is unchanged.
+- Fixed `NamedTemporaryFile(delete=False)` temp file leak in `test_empty_trace_cli_eval` — replaced with `tmp_path` fixture.
+- Added `call_count` tracking to `FakeAnthropicClient` and verification assertions in `sys.modules` mock test.
+
+Tests: 170 → 176 (+6), all pass in 0.79s.
+
+**Next session** should tackle the improvement loop API design (Priority 3 from review) or add a calibration threshold unit test in `test_calibration.py` for moderate-correlation scenarios with different threshold values.
