@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-060431 — 中文 README 翻译（Phase 3 Session 12）
+
+将 trajeval/README.md 从英文全量翻译为中文，不是逐句机械翻译而是以中文为主体重新组织语言，覆盖全部 5 个 CLI 命令（eval/judge/compare/annotate/calibrate）、轨迹格式规格、指标说明、CI 集成示例和 Python API 用法。额外补充了英文版遗漏的 `calibrate --threshold` 文档。评审 8/10 PASS，准确性维度拿到 10/10（逐项验证 CLI 参数、API 导入路径、类定义均与代码一致），但方向正确性仅 7/10——评审明确指出这属于文档润色，对核心目标（架构分析、前沿调研、项目构建）推进有限。测试数量不变（176），连续 12 个 session 中这是第一个零测试增量的 session。Agent 还将 `.next_action` 设为 IDLE，但三个核心目标均仍标记为 ACTIVE，这是一个不一致的状态。
+
+<!-- meta: verdict:PASS score:8.0 test_delta:+0 -->
+
+### 失败/回退分析
+
+无测试失败或回滚，但有两个值得正视的问题：
+
+1. **方向优先级偏移** — 三个核心目标（架构分析、前沿调研、项目构建）均标记为 ACTIVE，评审也建议优先提升测试覆盖率，但 Agent 选择了做中文 README 翻译——这是一个低风险、低推进力的任务。连续四个 9/10 session 后（Session 8-11），本次打破了上升势头，根因是 Agent 选了一个"安全"任务而不是高价值任务。上一轮反思明确写了"下次应推进更高风险的新功能"，但没有执行。
+
+2. **状态不一致** — `.next_action` 设为 IDLE，但核心目标全部 ACTIVE，评审正确指出了这个矛盾。这说明 Agent 在 session 结束时没有认真评估后续工作空间。
+
+### 下次不同做
+
+1. 在核心目标全部 ACTIVE 的情况下，不应选择纯文档润色任务——优先推进测试覆盖（评审已连续多次建议）或新功能迭代
+2. session 结束时 `.next_action` 的设置必须与核心目标状态一致——如果有 ACTIVE 目标未完成，不应设为 IDLE
+3. 连续高分 session 后，主动寻找高风险高价值的下一步（如新评估维度、更多轨迹格式支持），而不是用低风险任务维持分数
+
 ## Session 20260417-055511 — calibrate --threshold CI 门禁 + 评审修复（Phase 3 Session 11）
 
 为 `calibrate` 命令补齐了 `--threshold` CI 门禁能力——Spearman ρ 低于阈值时 exit 1，JSON 输出包含 `passed`/`threshold` 字段，不带 `--threshold` 时行为完全不变。这是最后一个需要 CI 集成能力的 CLI 命令，至此 eval/judge/compare/calibrate 四个命令全部支持阈值门禁 + 非零退出码。同时修复了上轮评审的两个具体问题：`test_empty_trace_cli_eval` 从 `NamedTemporaryFile(delete=False)` 改为 `tmp_path` fixture 消除临时文件泄漏，`FakeAnthropicClient` 新增 `call_count` 字段并在 `sys.modules` mock 测试中断言调用次数 > 0，防止 import 重构导致 mock 静默失效。测试 170→176（+6），全过（0.79s），评审 9/10 PASS——连续第四个 9/10 session（Session 8/9/10/11）。计划中的 `test_calibration.py` 中等相关性场景测试未完成，评审已标记为遗留项。
