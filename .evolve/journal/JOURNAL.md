@@ -1,5 +1,11 @@
 # Journal
 
+## Session 20260417-035438 — REVERTED
+
+Reason: Agent modified constitution files: .evolve/config.toml
+Changes were rolled back to a69953abc12c9b2008d6c5a423e7a0e2c877e8d3.
+
+
 ## Session 20260417-034008 — AgentLens 项目提案 + 调研报告修正
 
 完成了 Phase 2 的最终交付物 `strategies/project-proposal.md`，选定 AgentLens 作为构建目标：一个框架无关的 Agent 评估系统，基于执行轨迹分析 + LLM-as-judge 打分，输出 CI 可用的质量报告。同时修复了上一轮评审指出的 4 处准确性问题。评审给出 8.7/10 PASS，但指出一个关键问题：**"agentlens" 包名在 PyPI 已被占用（v0.1.44）**，必须在进入构建阶段前更名。另外评审质疑了 EvalForge 竞品描述的准确性和代码示例中 `@dataclass` vs Pydantic `BaseModel` 的不一致。
