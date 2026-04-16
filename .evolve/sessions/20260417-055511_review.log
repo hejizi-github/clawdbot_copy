@@ -1,0 +1,10 @@
+评审完成。
+
+**Verdict: PASS — 加权总分 9/10**
+
+主要发现：
+- `calibrate --threshold` 功能实现正确，与其他 CLI 命令的 CI 集成模式一致
+- 176 个测试全部通过，弱相关 fixture 设计合理（ρ=0.5）
+- 向后兼容性好，两个 review fix 干净
+
+两个小建议：补充 `test_calibration.py` 的中等相关性单元测试（计划遗留），以及给 `--threshold` 加 `click.FloatRange(0.0, 1.0)` 输入校验。

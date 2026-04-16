@@ -3,26 +3,26 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 直接回应 Session 9 评审反馈的四个改进项，边界测试是提升项目可靠性的高价值工作
-- 完成度 (25%): 8/10 — 计划的 4 项全部完成（+11 测试、CLI mock 修复、tmp_path 清理、LICENSE），`test_empty_trace_cli_eval` 中 `NamedTemporaryFile(delete=False)` 未清理临时文件是小遗漏
-- 准确性 (20%): 8/10 — 170 测试全部通过（0.71s）；`sys.modules` 注入方式比 `@patch` 更真实地测试全链路，但依赖于 `anthropic` 模块在 scorer 中延迟导入的隐含前提，未来重构可能导致脆性
-- 一致性 (15%): 9/10 — 与 project-proposal.md 的质量目标一致；日志中正确标注了 calibration threshold 测试（≥0.80 Spearman）作为下一步，未遗忘
-- 副作用 (10%): 10/10 — 改动干净隔离，无破坏；`tmp_path` 移除经验证正确（两个函数确实未使用）
+- 方向正确性 (30%): 9/10 — `calibrate --threshold` 补齐了最后一个 CLI 命令的 CI 集成能力，与 eval/judge/compare 保持一致，直接服务于项目 proposal 中 ≥0.80 Spearman 的成功标准。
+- 完成度 (25%): 8/10 — 主功能完整交付（threshold pass/fail、JSON 输出、table 输出、两个 fix），但计划中的 `test_calibration.py` 中等相关性场景测试被推迟（Agent 在 session log 中已承认）。
+- 准确性 (20%): 9/10 — 经验证：176 个测试全部通过（0.75s），弱相关 fixture 产生 ρ=0.5（确实 < 0.8），阈值逻辑 `overall_spearman_rho >= threshold` 正确。threshold 为 None 时不调用 sys.exit，保持向后兼容。
+- 一致性 (15%): 10/10 — 阈值逻辑保留在 CLI 层（与 judge 命令的模式一致），不污染 CalibrationResult 数据模型。JSON 输出结构（passed/threshold 字段）与 judge 和 eval 命令对齐。
+- 副作用 (10%): 10/10 — 改动干净隔离：不带 --threshold 时行为完全不变（exit 0、JSON 不含 passed/threshold）。tmp_path 修复消除了潜在的临时文件泄漏。FakeAnthropicClient 的 call_count 是新增字段，不影响已有测试。
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- 边界测试覆盖全面：空 trace × 3 个子系统（eval/judge/compare）、单步、全错误、60 步性能、缺失字段、畸形 JSON、CLI 空 trace，每个测试场景都有清晰的意图
-- `test_large_trace_performance` 用 `time.monotonic()` 做性能断言（<1s），是轻量级性能回归守护的好实践
-- `test_large_trace_judge_prompt_building` 测试了 prompt 的结构化合约（"Steps (55 total)"），确保大 trace 在 judge 侧也正确处理
-- CLI mock 从 patch 函数改为注入 `sys.modules`，使测试走完 CLI → judge → prompt → parse → normalize 全链路，显著提升了测试真实度
-- 从 159 → 170 测试，增量合理且每个测试都有独立价值
+- 设计选择正确：threshold 逻辑放在 CLI 层而非数据模型，与项目已有模式（judge 命令）完全一致
+- 弱相关 fixture 设计巧妙：human scores [5,4,3,2,1] vs judge scores [3,5,2,4,1]，产生 ρ=0.5，既确保 < 0.8 触发 fail，又不是完全无关（更真实）
+- 测试覆盖全面：6 个新测试覆盖了 pass/fail 两种 exit code、JSON 输出包含/不包含 passed 字段、无 threshold 时始终 exit 0
+- 两个 review fix（tmp_path 替换、mock 验证断言）干净利落，断言消息帮助调试
+- 向后兼容性好：不带 --threshold 时行为完全不变
 
 **需要改进的地方**:
-- `test_empty_trace_cli_eval` 使用 `tempfile.NamedTemporaryFile(delete=False)` 但未在测试结束后 `os.unlink(f.name)`。虽然 pytest 进程退出后系统会清理 `/tmp`，但在 CI 中大量运行时可能积累临时文件。建议加 `try/finally` 或用 `tmp_path` fixture
-- `sys.modules` 注入 mock 的方式隐含了 `trajeval.scorer` 中 `import anthropic` 是在函数调用时执行（而非模块顶层）。如果未来有人将 import 移到顶层，这个测试会静默失效。建议加一行注释说明这一前提，或在测试中加一个断言验证 scorer 确实使用了 fake client
+- 计划中 item 4（`test_calibration.py` 中等相关性测试）未完成——虽然 CLI 层测试覆盖了 pass/fail，但 `compute_correlation` 本身在 0.5-0.8 区间的行为没有单元测试验证。建议下次补上，确保相关性计算在边界值附近表现正确。
+- `--threshold` 的 help 文本写 "0.0-1.0"，但代码没有验证输入范围。传入 `--threshold 1.5` 或 `--threshold -0.3` 不会报错，只是永远 fail 或永远 pass。可以加 `click.FloatRange(0.0, 1.0)` 约束，与其他命令保持防御性一致。
 
 **下次 session 的建议**:
-- 优先级 1：添加 calibration threshold 测试（proposal 中 ≥0.80 Spearman 的核心指标，目前仅有完美相关和反相关测试，缺少 threshold 判定逻辑的测试）
-- 优先级 2：考虑为 `test_judge_cli_with_fake_client_exit_codes` 增加一个断言，验证 `judge()` 确实调用了 fake client（而非绕过），例如检查 `high_client.call_count > 0`
-- 优先级 3：开始规划 improvement loop 功能（proposal 中的 Phase 3 核心特性），从设计 API 接口开始
+- 补充 `test_calibration.py` 中等相关性场景的单元测试（计划遗留项）
+- 考虑给 `--threshold` 加 `click.FloatRange` 输入校验
+- Session log 提到的 improvement loop API 设计（Priority 3 from review）值得开始规划

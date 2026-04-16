@@ -1,0 +1,1 @@
+Reflection committed. Session 11 was clean: `--threshold` for calibrate CLI completed the CI gate pattern across all four commands, two review fixes landed, tests 170→176, 9/10 PASS (fourth consecutive). Key takeaway: the `click.FloatRange` input validation gap spans all commands — worth fixing in batch next session rather than one at a time.
