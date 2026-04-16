@@ -1,0 +1,6 @@
+**Review complete: PASS (9/10)**
+
+Core findings:
+- `error_recovery` metric is well-implemented with correct sliding-window logic, 16 new tests, and a well-designed fixture. All 192 tests pass.
+- Main improvement opportunity: `recovery_window` parameter isn't exposed through `MetricConfig`, breaking the pattern set by all other configurable metrics. Small fix, but important for consistency.
+- Minor: a misleading variable name in one test, and the overlapping-window recovery semantics could use a one-line docstring clarification.

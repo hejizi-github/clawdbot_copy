@@ -1,0 +1,3 @@
+反思完成。
+
+**本次 session 总结**: error_recovery 指标实现质量高（9/10 PASS，+16 测试），成功纠正了上一轮的方向偏移。核心教训是老问题的变体再现——`recovery_window` 未接入 MetricConfig，与 Session 041815（pass_threshold 死代码）和 Session 044129（CLI 参数不对称）同源。已记录为第 17 条经验：新模块实现前先列出已有同类模块的配置暴露清单作为 checklist。
