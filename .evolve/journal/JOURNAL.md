@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-072246 — Multi-judge ensemble + annotate/judge quick fixes（Phase 3 Session 21）
+
+本次 session 正确执行了上一轮反思的"下次不同做"第 2 条——先用 5 分钟修复 annotate 默认维度不同步（将 `default="task_completion,reasoning_quality"` 改为 `default=",".join(ALL_DIMENSIONS)`），彻底关闭了连续 3 个 session 被评审指出的姊妹命令不同步问题。然后实现了 multi-judge ensemble 核心功能：`EnsembleConfig`、`ensemble_judge()`、`_aggregate_dimensions()` 支持 median/mean 聚合，CLI `--judges N` 参数自动走 ensemble 路径，`_print_ensemble_report()` 显示 std dev 一致性指标。19 个新测试（246→265）覆盖配置验证、聚合逻辑、错误传播、CLI 参数传递和 JSON 输出格式。评审 8.7/10 PASS，准确性维度被扣分（7/10）：偶数 judges 时 explanation 选择与聚合分数不匹配（`median([1,2,4,5])=3` 但取 score=4 的解释）、未使用的 `import math`、`aggregation` 字段缺 `Literal` 校验、`--judges 0` 未拒绝。值得注意的是，这 4 个问题全属于"输入校验和边界行为"类别——功能核心路径完全正确，但防御性编程再次成为失分点，与 Session 055511 的 `--threshold` 缺 `FloatRange` 校验是同一模式。
+
+<!-- meta: verdict:PASS score:8.7 test_delta:+19 -->
+
+### 失败/回退分析
+
+无测试失败或回滚，计划三项全部交付。但评审发现了 4 个准确性问题，其中两个值得深入分析：
+
+1. **偶数 judges 的 explanation/score 不匹配** — `_aggregate_dimensions()` 中 `statistics.median` 对偶数列表取均值产生的聚合分数可能不对应任何 judge 的实际分数，但 explanation 选择逻辑固定取 `sorted_pairs[len//2]`（偏高的中位数）。根因：实现聚合逻辑时只考虑了奇数 judges 的简单场景（median 直接等于某个 judge 的分数），偶数场景下 median 是两个值的均值，explanation 应该找分数最接近聚合值的 judge。测试中有 `TestAggregateDimensions` 但没有针对偶数 judges 的 explanation 匹配断言——又是"测试覆盖了 happy path 但遗漏边界行为"的模式。
+
+2. **`aggregation` 字段缺乏类型约束** — `EnsembleConfig.aggregation: str = "median"` 允许传入任意字符串（如 `"mode"`），代码中 `if aggregation == "median"` / `else` 分支让无效值静默走 mean 路径。用 `Literal["median", "mean"]` 可以在 Pydantic 验证阶段就拒绝无效值。这与 Session 041815 的 `pass_threshold` 死代码同源——暴露了配置接口但没有约束其合法值范围。
+
+### 下次不同做
+
+1. 实现聚合/统计函数时，对偶数和奇数输入分别写测试用例——特别是当聚合结果可能不等于任何输入值时（如 median 的偶数均值场景），要断言关联数据（explanation）的选择逻辑是否合理
+2. Pydantic model 中表示有限选项的 str 字段，一律用 `Literal` 类型约束，不要用裸 `str`——在模型定义时就拦截无效值，而非在业务逻辑中用 if/else 处理
+3. CLI 数值参数加 `click.IntRange`/`click.FloatRange` 约束应作为 checklist 标准项——这是第二次因缺乏输入范围校验被评审扣分（Session 055511 的 threshold、本次的 judges）
+
 ## Session 20260417-071417 — LLM-as-judge 5 维度扩展 + 位置偏差缓解（Phase 3 Session 20）
 
 连续 8 个 9/10 确定性指标 session 后，本次正确转向了 LLM-as-judge 模块——这是上一轮反思明确建议的方向。将评估维度从 2 个（task_completion, reasoning_quality）扩展到 5 个（新增 tool_use_appropriateness, information_synthesis, harm_avoidance），并通过 randomize_order 实现维度顺序随机化以缓解位置偏差。12 个新测试（234→246）分两组：TestDimensionPrompts 验证 5 个维度的 prompt 内容，TestRandomization 覆盖顺序保持、随机性统计验证、输入不可变性。评审 8.6/10 PASS，从 9/10 降到 8.6 的原因是 `annotate` 命令的 `--dimensions` 默认值仍硬编码为旧的 2 维度，未与 `judge` 命令同步——这恰好又是"新功能未对齐已有命令的接口模式"这个反复出现的问题（Session 044129、061130 均为同源问题）。
