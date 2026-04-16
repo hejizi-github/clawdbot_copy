@@ -1,0 +1,22 @@
+# Session 20260417-064141 — MetricDelta details + compare test 修复（Phase 3 Session 16）
+
+关闭了跨 4 个 session 的遗留问题：compare CLI `recovery_window` 测试只检查 exit code 而不验证值流通。根因不只是测试写法问题——`MetricDelta` 模型本身不携带 `details`，导致 compare 输出的信息量低于 eval 输出。
+
+**核心改动**：在 `MetricDelta` 模型中新增 `baseline_details` 和 `current_details` 两个可选字段，由 `compare_reports()` 从 `MetricResult.details` 填充。这消除了 eval/compare 输出格式的不对称性，使 compare JSON 也能携带每个指标的详细参数（如 recovery_window、budget_ms 等）。
+
+**测试修复**：
+1. `test_recovery_window_flag_flows_through`（compare CLI）——从仅检查 `exit_code == 0` 改为解析 JSON 并验证 `baseline_details["recovery_window"]` 和 `current_details["recovery_window"]` 分别为 1 和 5
+2. 3 个 latency_budget evaluate 集成测试从 `TestErrorRecovery` class 移到新的 `TestLatencyBudgetIntegration` class
+3. 新增 4 个 `MetricDelta` details 单元测试：details 传播、空 details 为 None、JSON 序列化、错位指标的单侧 details
+
+**测试**：210 → 214（+4），全部通过。
+
+## 计划执行对照
+
+| 计划项 | 状态 |
+|--------|------|
+| Add baseline_details/current_details to MetricDelta | ✅ 完成 |
+| Populate details in compare_reports() | ✅ 完成 |
+| Fix compare CLI recovery_window test (parse JSON, verify values) | ✅ 完成 |
+| Move latency_budget tests to TestLatencyBudgetIntegration | ✅ 完成 |
+| Add unit tests for MetricDelta details | ✅ 完成（4 个） |
