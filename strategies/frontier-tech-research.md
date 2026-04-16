@@ -44,11 +44,11 @@ Clawdbot's agent orchestration uses hierarchical spawning (`SpawnAcpParams`) wit
 Memory architecture has converged on a **hybrid vector-graph** approach:
 
 **Mem0** is the leading open-source memory system:
-- Two-phase pipeline: extract → consolidate → retrieve
+- Three-stage pipeline: extract → consolidate → retrieve
 - Hierarchical memory: user-level, session-level, agent-level
 - 19 vector store backends supported
 - Optional graph memory (Neo4j, Kuzu) for entity relationships
-- Performance: 26% higher accuracy vs OpenAI's memory; 89-95% compression rates
+- Performance: 26% higher accuracy vs OpenAI's memory (self-reported by Mem0; no independent benchmark); 89-95% compression rates
 - Graph trade-off: Mem0g 68.4% vs Mem0 66.9% LLM score; latency 2.59s p95 vs 1.44s
 
 **Memory consolidation** (episodic → semantic) has become standard:
@@ -93,12 +93,13 @@ The sandbox landscape has matured significantly:
 - Cloudflare, Vercel, Ramp, Modal all shipped sandbox features
 - E2B became the default for prototype-to-production sandboxing
 
-**OWASP Top 10 for Agentic Applications** (Dec 2025):
+**OWASP Top 10 for Agentic Applications** (Dec 2025, selected items):
 1. Agent Goal Hijacking (ASI01)
 2. Tool Misuse (ASI02)
 3. Identity & Privilege Abuse (ASI03)
 4. Human-Agent Trust Exploitation (ASI09)
 5. Rogue Agents (ASI10)
+*(5 of 10 listed — see full list at OWASP reference)*
 
 Core defense principle: **Least Agency** — minimum autonomy, tool access, and credential scope for the intended task.
 
@@ -204,7 +205,7 @@ Core defense principle: **Least Agency** — minimum autonomy, tool access, and 
 
 Anthropic's engineering blog has published a series of foundational patterns:
 
-**"Building Effective Agents"** (Dec 2025):
+**"Building Effective Agents"** (Dec 2024):
 - Start simple, add complexity only when needed
 - Composable patterns: routing, parallelization, orchestrator-worker, evaluator-optimizer
 - Tools are the backbone of agentic systems
