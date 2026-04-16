@@ -3,25 +3,24 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 完成 project-proposal.md 中规划的第 6 个也是最后一个确定性指标 `latency_budget`，直接推进核心目标
-- 完成度 (25%): 8/10 — 指标函数、Config、引擎集成、CLI、测试、README 全部贯通；但 compare CLI 的 `recovery_window` 测试改进不彻底（见下方详述）
-- 准确性 (20%): 9/10 — 评分公式 `min(budget/actual, 1.0)` 正确，边界处理（zero/negative budget → no_budget, zero duration → no_duration）合理，与 `step_efficiency`/`token_efficiency` 的模式一致
-- 一致性 (15%): 10/10 — 与 project-proposal.md 的指标表完全对应，代码风格与现有 5 个指标一致，CLI flag 命名约定统一
-- 副作用 (10%): 9/10 — integration test 的 metric count 断言从 5→6 全部同步更新，无遗漏，210 测试全部通过
+- 方向正确性 (30%): 9/10 — 精准定位了 eval/compare 输出格式不对称这一根因，修复了持续 4 个 session 的遗留问题，同时提升了 compare 输出的信息完整度
+- 完成度 (25%): 9/10 — 计划中的 4 项工作全部完成：MetricDelta 新增字段、compare CLI 测试修复、latency_budget 测试迁移、4 个新单元测试，测试从 210 增到 214 全部通过
+- 准确性 (20%): 8/10 — 代码逻辑正确，`b_details or None` 利用空 dict 的 falsy 特性将 `{}` 转为 `None` 是合理的设计选择。轻微注意点：如果未来有合法的空 details dict 需要与"无 details"区分，这个 pattern 会产生歧义，但当前语义下没问题
+- 一致性 (15%): 9/10 — 变更与 eval 输出已有的 details 模式一致，消除了 eval/compare 之间的信息不对称，符合项目一贯的对称性设计原则
+- 副作用 (10%): 9/10 — 新增字段是可选的（`None` default），不影响已有的 ComparisonResult 消费者；测试迁移只是改了 class 归属，不影响测试逻辑；214 个测试全部通过
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- 全栈贯通：一个新指标从 `metrics.py` 函数 → `MetricConfig` 字段 → `evaluate()` 集成 → CLI `--latency-budget` flag → 单元测试 8 个 + 集成测试 4 个，无遗漏环节
-- 边界覆盖完善：8 个单元测试覆盖了 no_duration / no_budget / under / over / exactly-on / way-over / negative / zero 全部边界
-- 新的 `test_latency_budget_flag_flows_through`（compare CLI）不仅检查 exit code，还解析 JSON 验证 `metric_deltas` 中包含 `latency_budget` 条目——比旧的 `recovery_window` 测试模式更严谨
-- README 同步更新了特性列表、示例输出表、eval/compare 参数表、指标说明表
+- 根因分析到位：不是简单修测试，而是追溯到 MetricDelta 模型层面的信息丢失，从源头解决
+- 测试设计全面：4 个新测试覆盖了正常传播、空 details、JSON 序列化、错位指标单侧 details 四种场景
+- 测试组织改进：将 latency_budget 测试从 TestErrorRecovery 移到独立的 TestLatencyBudgetIntegration，提高了可读性
+- 计划与执行完全对齐，没有范围蔓延
 
 **需要改进的地方**:
-- **compare CLI `recovery_window` 测试仍然偏弱**：计划明确写了"verify recovery_window value flows into the error_recovery metric details"，但 `test_recovery_window_flag_flows_through`（第 256-266 行）实际只检查了 exit_code == 0，没有解析 JSON 验证 `details.recovery_window` 值。对比 eval 命令的 `test_recovery_window_flag_changes_output`（解析 JSON 并断言 `details["recovery_window"]` == 1 和 == 5），compare 版本的严谨度仍不对等。建议补充：解析两次输出的 JSON，从 `metric_deltas` 中提取 error_recovery 的 baseline/current details，验证 recovery_window 值实际为 1 和 5
-- **latency_budget 的 evaluate 集成测试放在 `TestErrorRecovery` class 下**（test_metrics.py:538-569）：`test_evaluate_includes_latency_budget`、`test_config_latency_budget_flows_through_evaluate`、`test_config_latency_budget_default_is_none` 这三个测试语义上属于 latency_budget，放在 ErrorRecovery class 末尾容易让后续开发者困惑。建议移到 `TestLatencyBudget` class 或新建 `TestLatencyBudgetIntegration` class
+- `b_details or None` 的 falsy 短路模式虽然当前正确，但含义不够显式。考虑改为 `b_details if b_details else None` 或更直白的 `b_details or None`（保持现状也可以，这只是风格偏好级别的建议，不影响评分）
+- test_metrics.py 第 538-539 行有两个连续空行（`TestErrorRecovery` 类结束后），虽然不影响功能但 PEP 8 推荐类之间恰好两个空行，多了一行
 
 **下次 session 的建议**:
-1. **修复 compare CLI recovery_window 测试**（本次的遗留项）：让它真正解析 JSON 验证值流通，与 eval 测试对齐
-2. **开始 LLM-as-judge 迭代**：6 个确定性指标已全部就绪，可以转向提升 LLM-as-judge 的质量（多维度评分、自定义 prompt、calibration 改进）
-3. **考虑添加 `--loop-ngram-sizes` 和 `--loop-min-repeats` CLI flags**：MetricConfig 中仅剩这两个字段未暴露到 CLI
+- 此 session 关闭了一个长期遗留问题，代码质量和测试覆盖都很好。建议下个 session 关注新功能开发或性能方面的改进，而非继续 polish 已有代码
+- 可以考虑为 `format_markdown()` 添加 details 展示支持，让 markdown 报告也能受益于这次 MetricDelta 的 details 扩展

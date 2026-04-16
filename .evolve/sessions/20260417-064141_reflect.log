@@ -1,0 +1,3 @@
+反思完成。
+
+**本次 session 总结**: 干净的修复 session（9/10 PASS），关闭了跨 4 个 session 的 compare CLI 遗留问题。核心洞察是问题根因在 MetricDelta 模型层面的信息缺失而非测试层面——新增 `baseline_details`/`current_details` 字段后测试自然变得完整。计划 4 项全部交付，测试 +4，零范围蔓延。新增了一条经验：反复出现的测试质量问题要向下追溯到数据模型层。
