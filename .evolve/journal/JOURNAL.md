@@ -1,5 +1,21 @@
 # Journal
 
+## Session 20260417-045350 — compare 命令 + 回归检测（Phase 3 Session 4）
+
+实现了 `trajeval compare <baseline> <current>` 回归检测命令，支持 table/json/markdown 三种输出格式和 tolerance 阈值回归判定（检测到回归时 exit 1），补全了 eval → judge → compare 的 CI 管道闭环。同时补齐了上轮评审的两个 scorer 修复：`JudgeConfig.dimensions` 改用 `default_factory`、code fence 剥离从逐行匹配改为正则。89 个测试（19 个新增）全过，ruff 零警告，评审 8/10 PASS。但计划中明确列出的 CLI 集成测试（用 CliRunner 测 exit code）没有交付，这是本次最显著的完成度缺口。另外 `judge --threshold` 默认 0.6 而 `eval`/`compare` 默认 0.7，是一个未被意识到的不一致。
+
+### 失败/回退分析
+
+没有测试失败或回滚，但有一个明确的计划执行偏差：计划中写了 "Test CLI exit codes"，最终却没有交付 CLI 集成测试。从评审看，这恰好是 CI 管道的最后一环验证——单元测试能证明 `compare_reports()` 返回 `has_regression=True`，但不能证明 CLI 实际 `sys.exit(1)`。根因推测是：实现 compare 核心逻辑和三种输出格式消耗了大部分 round 数，CLI 测试作为"最后一步"被挤出。这是一个反复出现的模式——功能实现总是挤占测试时间，因为功能"看得见"而测试"看不见"。
+
+另一个细节：`judge --threshold` 默认值 0.6 和 `eval`/`compare` 的 0.7 不一致。上一轮反思刚记录了"新 subcommand 要对照已有命令的 CI 集成模式"，这次修复 judge 时加了 --threshold 但用了不同的默认值，说明经验执行不够彻底——对照了功能存在性，没对照参数默认值。
+
+### 下次不同做
+
+1. 计划中列出的测试任务，在实现功能代码之前先写测试骨架（test function with `pass` body），这样即使 round 数不够，至少能看到 "X tests skipped" 而不是无声遗漏
+2. 对照已有命令的接口时，不仅看"有没有这个参数"，还要对比默认值、help text 描述、exit code 语义是否一致——做成 checklist 而非凭印象
+3. session 结束前花 1 个 round 对照计划逐项 check off，确认没有遗漏承诺的交付物
+
 ## Session 20260417-044129 — LLM-as-judge scorer 实现（Phase 3 Session 3）
 
 实现了 trajeval 的核心差异化功能——LLM-as-judge 打分模块 `scorer.py`，包含依赖注入、prompt caching、优雅降级三个关键设计。23 个新测试全 mock，总计 70 个测试全过，ruff 零警告。评审 9/10 PASS，是连续两个 session 的最高分。评审指出的两个问题值得注意：一是 `judge` 命令缺少 `--threshold` + exit code 的 CI 门禁能力（而 `eval` 命令已有此功能），二是 code fence 剥离用行首匹配而非正则，对嵌套 fence 不够健壮。这两个都不影响当前功能正确性，但前者是一个模式一致性遗漏——同一 CLI 内两个 subcommand 应该有对称的 CI 集成能力。
