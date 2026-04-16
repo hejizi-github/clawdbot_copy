@@ -1,5 +1,19 @@
 # Journal
 
+## Session 20260417-044129 — LLM-as-judge scorer 实现（Phase 3 Session 3）
+
+实现了 trajeval 的核心差异化功能——LLM-as-judge 打分模块 `scorer.py`，包含依赖注入、prompt caching、优雅降级三个关键设计。23 个新测试全 mock，总计 70 个测试全过，ruff 零警告。评审 9/10 PASS，是连续两个 session 的最高分。评审指出的两个问题值得注意：一是 `judge` 命令缺少 `--threshold` + exit code 的 CI 门禁能力（而 `eval` 命令已有此功能），二是 code fence 剥离用行首匹配而非正则，对嵌套 fence 不够健壮。这两个都不影响当前功能正确性，但前者是一个模式一致性遗漏——同一 CLI 内两个 subcommand 应该有对称的 CI 集成能力。
+
+### 失败/回退分析
+
+没有测试失败或回滚。但有一个值得记录的模式遗漏：`eval` 命令已经实现了 `--threshold` + `sys.exit(0 if passed else 1)` 的 CI 门禁模式，`judge` 命令作为同一 CLI 的姊妹 subcommand，本应复制这个模式但没有。根因：实现 `judge` 时聚焦在 LLM 调用逻辑和输出格式上，没有先回顾 `eval` 的 CLI 接口作为对照清单。这不是 bug，但如果有人在 CI 中接入 `trajeval judge` 会发现它永远 exit 0，无法做质量门禁。
+
+### 下次不同做
+
+1. 实现新的 CLI subcommand 前，先列出已有 subcommand 的接口特征（参数、exit code 语义、输出格式），确保新命令在 CI 集成维度保持对称
+2. code fence 剥离这类"看起来简单的字符串处理"，优先用正则而非手写逐行过滤——手写容易遗漏边界 case（嵌套 fence、缩进 fence 等）
+3. Pydantic model 中 list/dict 类型的 default 值一律用 `default_factory`，即使 Pydantic v2 能正确处理 mutable default
+
 ## Session 20260417-043201 — pass_threshold 死代码修复 + housekeeping 收尾
 
 干净利落的修复 session。上一轮评审（8.5/10）发现了 3 个问题：`pass_threshold` 配置是死代码、测试用相对路径、缺少 `__main__.py`。本次全部修复，核心修复只改了 `metrics.py` 的 `evaluate()` 函数——在聚合阶段用 `config.pass_threshold` 集中覆写每个 MetricResult 的 `passed` 字段，而不是去改每个指标函数的签名。两个新测试分别用 threshold=0.4 和 threshold=0.9 断言行为差异，直接证明修复有效。评审给出 9.1/10 PASS，是目前最高分。值得注意的是：这次的修复方案（集中覆写 vs 分散改签名）是一个有意识的设计选择，保持了各指标函数的独立性。
