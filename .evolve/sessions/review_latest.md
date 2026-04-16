@@ -3,24 +3,23 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — CI 输出格式直接实现了 project-proposal 中 "CI/CD Integration" 的核心功能，是 trajeval 区别于同类工具的关键差异点；两个 review fix 也属于上轮建议的正常跟进。
-- 完成度 (25%): 9/10 — eval 和 compare 的 `--format ci` 完整实现，含 GitHub Actions 三级注释 + Markdown 摘要表；review fix 两条均已落地；23 个新测试覆盖了单元和 CLI 集成两层。唯一小遗漏是 `judge` 命令未支持 `--format ci`（session log 自己也提到了"Could extend CI format to judge command"）。
-- 准确性 (20%): 9/10 — GitHub Actions annotation 语法 `::error title=...::message` 正确；borderline 阈值 0.85 合理；`_aggregate_dimensions` 的 `Literal["median", "mean"]` 类型签名与 click.Choice 定义一致。一个小瑕疵：`format_compare_ci` 参数 `result` 缺少类型标注（用了 bare `result`），而同模块 `format_eval_ci` 有完整标注，风格不一致。
-- 一致性 (15%): 9/10 — 与 project-proposal 的 roadmap（Phase 2: CI integration, regression gates）完全对齐；输出格式与已有的 table/json/markdown 格式体系平行扩展，无冲突。
-- 副作用 (10%): 10/10 — 变更干净隔离：新文件 `ci_output.py` 独立模块，CLI 仅增加 choice 选项和两个 elif 分支，对已有路径零影响。273 个既有测试全部通过。
+- 方向正确性 (30%): 9/10 — 补齐了 `judge` 命令的 `--format ci` 支持，使三个核心命令（eval/compare/judge）CI 集成完整对称，直接推进项目目标。
+- 完成度 (25%): 9/10 — 计划中的三项变更全部落地：`format_judge_ci` 函数、CLI wiring、测试覆盖。13 个新测试涵盖单 judge/ensemble/边界/CLI 集成，309 全量测试通过。
+- 准确性 (20%): 9/10 — 代码逻辑正确：annotation level 阈值（0-2=error, 3=warning, 4-5=notice）合理；ensemble 分支正确使用 `isinstance` 判定；`ComparisonResult` 类型标注修复准确。唯一微瑕：`format_judge_ci` 的 `passed` 参数默认值为 `True`，在独立调用时可能掩盖失败，但 CLI 入口已正确计算 `passed = result.overall_score >= threshold` 后传入，实际无风险。
+- 一致性 (15%): 9/10 — 与现有 `format_eval_ci` / `format_compare_ci` 的输出风格（annotation + markdown summary table）完全一致。`_judge_annotation_level` 的阈值体系与 `_annotation_level` 使用不同刻度（0-5 整数 vs 0-1 浮点），但这是合理的——judge 维度是离散 0-5 分。
+- 副作用 (10%): 10/10 — 变更完全隔离。新增函数和测试不影响现有功能。import 修复（`__import__` → `from unittest.mock import patch`）纯改善，无行为变化。全量测试无回归。
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- CI 输出设计考虑周到：三级注释（error/warning/notice）区分 fail、borderline、solid pass，对 CI 消费者非常实用
-- 测试覆盖扎实：23 个新测试覆盖了 format_eval_ci、format_compare_ci 的各种边界（空 metrics、borderline 阈值、details 提取），以及 CLI 集成测试（exit code 验证）
-- 两个 review fix 精准：`Literal` 类型约束和 single-judge aggregation 警告都是上轮评审的原样落地
+- 三个命令的 CI 输出格式现在完全对称，`eval`/`compare`/`judge` 都支持 `--format ci`，API surface 一致。
+- 测试覆盖细致：每个 annotation level 阈值边界都有测试（score 0, 1, 3, 4, 5），ensemble vs single judge 分支都覆盖，CLI 集成测试验证了 exit code 和 `--threshold` 联动。
+- `format_compare_ci` 的 `result` 参数从裸类型补上 `ComparisonResult` 标注，顺手修复了 tech debt。
+- 测试 import 风格统一修复（`__import__` hack → standard import），提升了可读性。
 
 **需要改进的地方**:
-- `format_compare_ci(result)` 的 `result` 参数缺少类型标注（应为 `ComparisonResult`），与 `format_eval_ci(report: EvalReport, ...)` 风格不一致。建议补上 `from .compare import ComparisonResult` 并标注。
-- 测试中 `TestJudgeSingleAggregationWarning` 使用了 `__import__("unittest.mock", fromlist=["patch"]).patch(...)` 这种非惯用写法，常规做法是 `from unittest.mock import patch` 放在文件顶部。虽然功能正确，但可读性差。
+- `format_judge_ci` 的 `passed` 参数默认为 `True` 不太理想。虽然 CLI 入口总会显式传入，但作为公共 API，默认 `True` 可能误导直接调用者。建议改为 `passed: bool | None = None`，未传时根据 `result.overall_score >= threshold` 自动计算，与 `format_eval_ci` 使用 `report.passed` 的模式对齐。这是小改善，不阻塞。
 
 **下次 session 的建议**:
-- 优先级 1：给 `judge` 命令也加上 `--format ci` 支持，补齐 CI 集成的最后一块拼图
-- 优先级 2：修复 `format_compare_ci` 的类型标注和测试中的 import 风格
-- 优先级 3：开始考虑 deterministic metrics 的增强（loop detection n-gram 优化、token efficiency baseline auto-inference），这是 proposal Phase 1 的收尾工作
+- 按 session log 提到的方向推进：deterministic metrics 增强（loop detection n-gram 优化、token efficiency baseline auto-inference）。这是 proposal Phase 1 收尾工作，优先级合理。
+- 可以考虑给 `ci_output.py` 中三个 `format_*_ci` 函数加一个统一入口（如 `format_ci(result_type, result, **kwargs)`），减少 CLI 中的分支判断，但这是锦上添花，不急。
