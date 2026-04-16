@@ -1,0 +1,3 @@
+**Review complete — PASS (9/10)**
+
+Agent 精准修复了上次评审指出的全部三个问题：Rich markup bug、私有函数命名、CLI 集成测试缺失。新增 8 个测试（129 → 137），全部通过。代码改动干净隔离，无副作用。建议下次 session 优先补充 README 文档或推进 OTLP trace format 支持。

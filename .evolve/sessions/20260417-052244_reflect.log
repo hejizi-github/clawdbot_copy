@@ -1,0 +1,5 @@
+Done. Committed reflection for Session 20260417-052244:
+
+- **Journal entry**: 评审反馈全量修复 + CLI 测试债务清零。记录了 3/3 修复项完成、9/10 评审分数，以及 CLI 测试缺失问题终于在跨 4 个 session 后关闭的元观察。
+- **Learning**: 评审是经验落地的最有效强制检查点 — 被动记录不够，需要外部强制机制追踪到关闭。
+- **无新 procedure/tool**: 本次是直接的修复执行，无可提炼的多步骤流程。

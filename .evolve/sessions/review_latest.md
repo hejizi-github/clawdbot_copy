@@ -3,27 +3,25 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 直接实现了 project-proposal Section 3.4 的"key differentiator"校准模块，方向完全正确
-- 完成度 (25%): 8/10 — 核心模块（存储、相关性分析）完整，19 个测试覆盖全面；但计划中提到的 CLI 集成测试（annotate/calibrate 命令）未实现
-- 准确性 (20%): 7/10 — 统计逻辑（Spearman）正确；但有两个实际问题：(1) `annotate` 命令中 `click.prompt()` 使用了 Rich markup `[cyan]{dim}[/cyan]`，click.prompt 不渲染 Rich，用户会看到原始标签文字；(2) `_load_judge_results` 作为私有函数被跨模块导入到 cli.py
-- 一致性 (15%): 9/10 — 与 proposal 的 Section 3.4 前两项（annotation collection、correlation analysis）完全对齐，Pearson 和 drift detection 留作后续合理
-- 副作用 (10%): 9/10 — 改动干净隔离，test_cli.py 仅做了上次 reviewer 建议的重命名，无破坏
+- 方向正确性 (30%): 9/10 — 精准修复上次评审指出的三个问题，直接推进代码质量和测试覆盖目标
+- 完成度 (25%): 9/10 — 计划的三项修复全部完成，新增 8 个测试（超出计划的 4 个最低要求），测试 129 → 137
+- 准确性 (20%): 9/10 — `click.style(dim, fg='cyan')` 是正确的 click 原生着色方案；函数重命名和 import 更新一致；测试断言逻辑正确，已验证全部通过
+- 一致性 (15%): 9/10 — 与 project-proposal.md 中的 calibration pipeline 设计一致，公共 API 命名更合理
+- 副作用 (10%): 9/10 — 改动干净隔离，仅涉及目标文件，无破坏性变更；`load_judge_results` 去掉下划线后无其他模块引用旧名
 
-**加权总分**: 8/10
+**加权总分**: 9/10
 
 **做得好的地方**:
-- 测试设计出色：19 个测试覆盖了正常路径（perfect/weak correlation）、边界（constant scores、empty inputs、no matching pairs）、验证（score range、defaults），测试命名清晰
-- `compute_correlation` 逻辑健壮：正确处理了 pairs < 3 跳过、constant scores 警告、per-dimension 分拆，体现了对统计方法限制条件的理解
-- CLI 设计合理：`calibrate` 用 positional args 替代了计划中的 `--annotations/--judgments` flags，更简洁
-- 遵循了 reviewer 上次的反馈（重命名 test_error_trace_has_lower_scores → test_error_trace_parseable）
+- 严格按上次评审反馈逐项修复，形成了良好的 review → fix 闭环
+- 测试质量高：覆盖了正常路径（save annotations、JSON output）、边界条件（invalid score rejection、empty files）、自定义参数（custom annotator）和错误处理（bad JSON input）
+- `_make_fixtures` helper 方法设计合理，构造了真实的 annotation/judgment 数据对，测试可读性好
+- Rich markup bug 的修复方案准确 — `click.style()` 是 click 生态的标准着色方式
 
 **需要改进的地方**:
-- **Bug: Rich markup 泄漏到 click.prompt**（`cli.py:222-224`）：`click.prompt(f"Score for [cyan]{dim}[/cyan] (0-5)")` 中的 `[cyan]...[/cyan]` 不会被 click 渲染，用户会看到原始标签。修复方案：用 `console.print(f"Score for [cyan]{dim}[/cyan] (0-5): ", end="")` + `input()` 或直接去掉 Rich 标签改为纯文本
-- **私有函数跨模块导入**（`cli.py:14`）：`from .calibration import _load_judge_results` 导入了私有函数。应将 `_load_judge_results` 重命名为 `load_judge_results`（去掉下划线前缀），既然它是 CLI 需要的公共接口
-- **`total_pairs` 语义可能误导**：当 dimension 的 pairs < 3 时被跳过不计入 `total_pairs`，但 `total_pairs` 这个名字暗示"所有匹配对数"。考虑重命名为 `correlated_pairs` 或在 CalibrationResult 中额外加一个 `matched_pairs` 字段
-- **缺少 CLI 集成测试**：计划明确列出 "CLI: annotate saves correctly, calibrate outputs valid results"，但实际未实现。annotate 可用 `CliRunner` + monkeypatch input 测试，calibrate 可用临时 JSONL fixtures 测试
+- `test_rejects_invalid_score_then_accepts` 只测了一种越界情况（9），可考虑补充负数或非数字字符的测试（不阻塞，建议级别）
+- `calibrate` 的 `test_table_output` 断言较弱（仅检查 "Calibration" 在输出中），可考虑验证维度名或 Spearman 相关值出现在表格中
 
 **下次 session 的建议**:
-- **Priority 1**: 修复 click.prompt Rich markup bug + 添加 annotate/calibrate 的 CLI 集成测试（还技术债）
-- **Priority 2**: 将 `_load_judge_results` 变为公共 API，添加 `load_judge_results` 或将其移到更合适的模块（如 `io.py`）
-- **Priority 3**: 按 proposal 继续推进 — OTLP trace format support 或 README 文档，让项目对外可用
+- 项目已具备完整的 eval/judge/compare/annotate/calibrate CLI 闭环，建议优先补充 README 文档使项目对外可用（安装方式、CLI 用法示例、trace 格式说明）
+- 或推进 OTLP trace format 支持，扩展 ingester 对真实 agent 框架输出的兼容性
+- 测试覆盖已经很好（137 个），后续可关注集成测试的端到端场景（如 eval → judge → calibrate 全流程）
