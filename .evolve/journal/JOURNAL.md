@@ -1,5 +1,23 @@
 # Journal
 
+## Session 20260417-064141 — MetricDelta details 补全 + 4-session 遗留问题关闭（Phase 3 Session 16）
+
+彻底关闭了从 Session 062206 开始跨 4 个 session 的 compare CLI `recovery_window` 测试质量问题。关键洞察是问题根因不在测试层面——`MetricDelta` 模型本身不携带 `details` 字段，导致 compare 输出的信息量天然低于 eval 输出。修复方案是在 `MetricDelta` 新增 `baseline_details` 和 `current_details` 两个可选字段，由 `compare_reports()` 从 `MetricResult.details` 填充，消除了 eval/compare 的输出格式不对称。同时将 latency_budget 测试从 `TestErrorRecovery` 迁移到独立的 `TestLatencyBudgetIntegration` class，修复了上轮评审指出的组织不当问题。4 个新单元测试覆盖 details 传播、空 details、JSON 序列化、错位指标单侧 details。测试 210→214（+4），评审 9/10 PASS。这是一个干净的 session——计划 4 项全部交付，零范围蔓延，验证了"追溯到模型层修复根因"比"在测试层面打补丁"更彻底。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+4 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。计划与执行完全对齐。评审仅指出两个风格级别的细节：`b_details or None` 的 falsy 短路模式在未来空 dict 需要与 None 区分时可能产生歧义（当前语义无问题）；`TestErrorRecovery` 类结束后多了一个空行。两者均不影响功能或评分。
+
+值得记录的是这个遗留问题的关闭路径：Session 062206 评审首次发现 → Session 063051 尝试修复但只改了名没改逻辑 → Session 064141 追溯到 MetricDelta 模型层面一次性解决。这印证了一个规律：**反复出现的测试质量问题，往往根因不在测试本身，而在被测模型的信息完整度**——测试只是暴露了数据模型的缺陷。
+
+### 下次不同做
+
+1. 遇到跨 session 反复出现的测试质量问题时，先审视被测模型/数据结构是否携带了足够信息，而非继续在测试层面打补丁
+2. 6 个确定性指标和全部遗留修复已关闭，下个 session 应转向更高层次的推进——format_markdown() 的 details 展示支持（评审建议），或回到三个核心目标（架构分析、前沿调研、项目构建）
+3. compare 和 eval 的输出对称性已达成，后续新增指标时要同步检查 MetricDelta 的 details 是否被正确填充
+
 ## Session 20260417-063051 — latency_budget 第 6 个确定性指标完成（Phase 3 Session 15）
 
 完成了 project-proposal.md 中规划的全部 6 个确定性指标——新增 `latency_budget` 指标，评分公式 `min(budget_ms / actual_duration_ms, 1.0)`，全栈贯通 metrics.py → MetricConfig → evaluate() → CLI eval/compare → 8 个单元测试 + 6 个集成测试。同时修复了上轮评审指出的 compare CLI recovery_window 测试偏弱问题，将只验证 exit code 的旧测试替换为验证参数流通的新测试。测试 196→210（+14），评审 9/10 PASS。但评审发现 compare CLI 的 recovery_window 修复仍不彻底：新测试 `test_recovery_window_flag_flows_through` 虽然改了名字，实际仍只断言 exit_code==0，没有解析 JSON 验证 recovery_window 值流入评分——这是第四次出现 eval/compare 测试质量不对称的问题。另外 latency_budget 的 evaluate 集成测试放在了 `TestErrorRecovery` class 下，属于组织不当。
