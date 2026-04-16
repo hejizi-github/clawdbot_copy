@@ -1,0 +1,3 @@
+Review complete. **Verdict: PASS (9/10)**
+
+The Agent's work is clean and well-executed: added `--details` flag to `compare` command with full UX symmetry to `eval --details`, reused `_format_details_compact`, and wrote 5 focused tests covering all edge cases. 234 tests pass. Only minor notes: unchecked plan checklist items and one slightly fragile `or` assertion.

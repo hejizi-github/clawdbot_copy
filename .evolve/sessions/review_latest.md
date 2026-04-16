@@ -3,26 +3,24 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 8/10 — `--details` flag 是对 eval 表格输出的自然增强，用户无需切到 JSON 即可查看诊断细节，方向正确且实用；同时修复了上轮评审的 markdown spacing 问题，体现了良好的反馈闭环。
-- 完成度 (25%): 9/10 — 计划中的所有条目全部交付：CLI flag、`_format_details_compact` 纯函数、compare.py 空行修复、以及覆盖 4 个场景的 eval 测试和 6 个独立的格式化函数测试。测试从 218 → 229，超过计划预期的 +4~6。
-- 准确性 (20%): 9/10 — `_format_details_compact` 正确处理了 empty dict、float 精度、list 转 count、skip keys 等边界情况；compare.py 的空行插入位置准确；`--details` 与 `--format json` 共用时正确忽略，无逻辑错误。
-- 一致性 (15%): 9/10 — `--details` flag 风格与已有 `--threshold`、`--format`、`--recovery-window`、`--latency-budget` 完全一致（Click option + is_flag 模式）；与 project-proposal.md 中 "CI-ready exit codes" 和 "framework-agnostic" 的设计理念协调。
-- 副作用 (10%): 10/10 — `--details` 默认关闭，已有输出零影响；compare.py 的空行是纯修复性改动；229 测试全部通过，无回归。
+- 方向正确性 (30%): 9/10 — 为 compare 命令补齐 --details flag 与 eval 对称，是 trajeval UX 完善的合理迭代，直接推进项目成熟度。
+- 完成度 (25%): 9/10 — CLI flag、渲染逻辑、5 个测试全部到位，plan 中 checklist 各项均已覆盖，无遗漏。
+- 准确性 (20%): 9/10 — 代码逻辑正确，复用 `_format_details_compact` 无重复实现，baseline_details/current_details 字段在 compare model 中存在且正确传递。234 测试全部通过。
+- 一致性 (15%): 9/10 — 与 eval --details 的实现模式完全对称（is_flag、_format_details_compact 复用、Overall 行占位），与 project-proposal.md 中"轻量级 CLI 工具"的定位一致。
+- 副作用 (10%): 10/10 — 改动干净隔离，仅影响 table 格式输出路径，json/markdown 格式被正确忽略，无既有功能破坏。
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- `_format_details_compact` 作为纯函数独立抽取，有 6 个专属测试覆盖各种类型（int/float/list/skip），设计干净。
-- `test_details_flag_with_json_format_ignored` 测试了 `--details` + `--format json` 的交叉场景，说明 Agent 考虑了边界情况。
-- compare.py 空行修复只动了 1 行，且有对应的新测试验证空行位置，改动精准。
-- Overall 行在有 details 时正确追加空字符串占位，避免 Rich Table 列数不匹配报错。
+- 复用 `_format_details_compact` 而非重复实现，保持了代码 DRY 原则
+- 测试覆盖全面：正向（显示 details）、反向（默认不显示）、内容验证、json/markdown 格式忽略验证，5 个测试覆盖所有边界
+- 测试中用部分匹配 `"total_ste"` 适配 80 列终端截断是务实的工程判断，session log 中也记录了原因
+- plan 和实现完全一致，执行纪律好
 
 **需要改进的地方**:
-- `_format_details_compact` 对嵌套 dict 值（如 `{"breakdown": {"success": 3, "fail": 1}}`）会直接 `str()` 输出，在终端可能很长。可以考虑对 dict 类型也做类似 list 的摘要处理（如 `breakdown={2 keys}`）。
-- `skip_keys` 硬编码为 `{"mode", "note"}`，如果未来 metrics 新增其他元数据字段需要手动维护。可以考虑让 metric 本身标记哪些 details key 是 display-relevant 的，但这是更远期的设计考量，当前不阻塞。
-- 计划 checklist 提到 "table 输出宽度在终端 80 列内可读"，但没有对应的验证。当 details 字段较多时（如 error_recovery 有 5+ 个 key），单行可能超宽。可以考虑 `max_width` 截断或换行策略。
+- Session log 中 checklist 的 4 项仍标记为 `[ ]` 未勾选，虽然实际都已完成。这是 session 管理的小疏忽，不影响代码质量。
+- `test_details_flag_shows_metric_info` 用 `or` 断言 (`"total_ste" in output or "failed=0" in output`) 略显脆弱——如果两个字符串都不出现测试仍会失败但错误信息不够明确。考虑至少添加一个 assertion message 说明期望什么。
 
 **下次 session 的建议**:
-- 优先考虑为 compare 表格也添加 `--details` 支持（Agent 在 log 中也提到了 "details to the compare table output for symmetry"），保持两个命令的 UX 对称性。
-- 或者考虑 `trajeval report` 聚合命令，将 eval + compare 合一，这对 CI 集成更友好。
-- 如果选择做 details 宽度优化，可以加一个 `--details-width` 参数或自动检测终端宽度来截断。
+- trajeval 的 CLI UX 已经比较完善（eval、compare、judge、calibrate 都有 details/format 支持）。建议下一步转向更高价值的方向：比如真实 trace 的端到端验证、或为 project-proposal 中提到的 "regression detection false positive rate <5%" 编写基准测试。
+- 也可以考虑补充 `trajeval compare --details` 的实际终端截图或示例输出到文档中，帮助用户理解输出格式。
