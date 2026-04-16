@@ -74,6 +74,28 @@ class TestEvalCommand:
         data = json.loads(result.output)
         assert "overall_score" in data
 
+    def test_recovery_window_flag_changes_output(self):
+        runner = CliRunner()
+        narrow = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "recovery_trace.json"),
+            "--format", "json", "--threshold", "0.1", "--recovery-window", "1",
+        ])
+        wide = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "recovery_trace.json"),
+            "--format", "json", "--threshold", "0.1", "--recovery-window", "5",
+        ])
+        narrow_data = json.loads(narrow.output)
+        wide_data = json.loads(wide.output)
+        narrow_recovery = next(
+            m for m in narrow_data["metrics"] if m["name"] == "error_recovery"
+        )
+        wide_recovery = next(
+            m for m in wide_data["metrics"] if m["name"] == "error_recovery"
+        )
+        assert narrow_recovery["details"]["recovery_window"] == 1
+        assert wide_recovery["details"]["recovery_window"] == 5
+        assert wide_recovery["details"]["recovered"] >= narrow_recovery["details"]["recovered"]
+
 
 class TestJudgeCommand:
     def _mock_judge_result(self, trace_id: str, score: float) -> JudgeResult:
@@ -197,6 +219,16 @@ class TestCompareCommand:
         data = json.loads(lenient.output)
         assert data["has_regression"] is False
         assert lenient.exit_code == 0
+
+    def test_recovery_window_flag_accepted(self):
+        trace = str(FIXTURES_DIR / "recovery_trace.json")
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", trace, trace, "--format", "json", "--recovery-window", "2",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "metric_deltas" in data
 
 
 class TestAnnotateCommand:

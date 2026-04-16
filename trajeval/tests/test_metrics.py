@@ -387,8 +387,8 @@ class TestErrorRecovery:
             ],
         )
         result = error_recovery(trace, recovery_window=2)
-        first_error_recovered = result.details["recovered"]
-        assert first_error_recovered < result.details["total_errors"]
+        recovered_count = result.details["recovered"]
+        assert recovered_count < result.details["total_errors"]
 
     def test_custom_window_size(self):
         trace = AgentTrace(
@@ -455,3 +455,29 @@ class TestErrorRecovery:
         high_m = next(m for m in high_report.metrics if m.name == "error_recovery")
         assert low_m.passed is True
         assert high_m.passed is False
+
+    def test_config_recovery_window_flows_through_evaluate(self):
+        """Verify MetricConfig.recovery_window changes evaluate() results."""
+        trace = AgentTrace(
+            trace_id="r12",
+            steps=[
+                TraceStep(type="error", name="fail"),
+                TraceStep(type="error", name="e2"),
+                TraceStep(type="error", name="e3"),
+                TraceStep(type="tool_call", name="fix"),
+            ],
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        narrow = MetricConfig(recovery_window=1)
+        wide = MetricConfig(recovery_window=3)
+        narrow_report = evaluate(trace, narrow)
+        wide_report = evaluate(trace, wide)
+        narrow_m = next(m for m in narrow_report.metrics if m.name == "error_recovery")
+        wide_m = next(m for m in wide_report.metrics if m.name == "error_recovery")
+        assert narrow_m.details["recovery_window"] == 1
+        assert wide_m.details["recovery_window"] == 3
+        assert wide_m.details["recovered"] > narrow_m.details["recovered"]
+
+    def test_config_recovery_window_default_is_three(self):
+        config = MetricConfig()
+        assert config.recovery_window == 3

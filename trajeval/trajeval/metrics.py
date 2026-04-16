@@ -28,6 +28,7 @@ class MetricConfig(BaseModel):
     baseline_tokens: int | None = None
     loop_ngram_sizes: list[int] = Field(default=[2, 3])
     loop_min_repeats: int = 2
+    recovery_window: int = 3
     pass_threshold: float = 0.7
 
 
@@ -177,6 +178,10 @@ def error_recovery(
 
     For each error step, checks whether a successful step (non-error) appears
     within the next `recovery_window` steps. Score = recovered / total_errors.
+
+    For consecutive errors (e.g. error→error→error→success with window=3),
+    each error is evaluated independently — all three count as recovered because
+    each one's window contains the success step.
     """
     errors = [i for i, s in enumerate(trace.steps) if s.type == "error"]
 
@@ -267,7 +272,7 @@ def evaluate(trace: AgentTrace, config: MetricConfig | None = None) -> EvalRepor
             min_repeats=config.loop_min_repeats,
         ),
         token_efficiency(trace, baseline_tokens=config.baseline_tokens),
-        error_recovery(trace),
+        error_recovery(trace, recovery_window=config.recovery_window),
     ]
 
     threshold = config.pass_threshold

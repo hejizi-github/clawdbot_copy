@@ -36,12 +36,17 @@ def main():
 @click.option(
     "--threshold", type=float, default=0.7, help="Pass/fail threshold (0.0-1.0, default 0.7)"
 )
+@click.option(
+    "--recovery-window", type=int, default=3,
+    help="Steps after an error to check for recovery (default 3)",
+)
 def eval(
     trace_file: Path,
     fmt: str,
     expected_steps: int | None,
     baseline_tokens: int | None,
     threshold: float,
+    recovery_window: int,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
@@ -53,6 +58,7 @@ def eval(
     config = MetricConfig(
         expected_steps=expected_steps,
         baseline_tokens=baseline_tokens,
+        recovery_window=recovery_window,
         pass_threshold=threshold,
     )
     report = evaluate(trace, config)
@@ -138,6 +144,10 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
 @click.option(
     "--threshold", type=float, default=0.7, help="Metric pass/fail threshold (0.0-1.0, default 0.7)"
 )
+@click.option(
+    "--recovery-window", type=int, default=3,
+    help="Steps after an error to check for recovery (default 3)",
+)
 def compare(
     baseline_file: Path,
     current_file: Path,
@@ -146,6 +156,7 @@ def compare(
     expected_steps: int | None,
     baseline_tokens: int | None,
     threshold: float,
+    recovery_window: int,
 ):
     """Compare two traces and detect metric regressions."""
     try:
@@ -158,6 +169,7 @@ def compare(
     config = MetricConfig(
         expected_steps=expected_steps,
         baseline_tokens=baseline_tokens,
+        recovery_window=recovery_window,
         pass_threshold=threshold,
     )
     baseline_report = evaluate(baseline_trace, config)

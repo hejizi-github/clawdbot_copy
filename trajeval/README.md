@@ -161,6 +161,7 @@ trajeval eval trace.json --expected-steps 5 --baseline-tokens 1000
 | `--threshold` | `0.7` | 通过/失败阈值（0.0-1.0） |
 | `--expected-steps` | — | 期望步骤数基线（用于效率评分） |
 | `--baseline-tokens` | — | Token 用量基线（用于效率评分） |
+| `--recovery-window` | `3` | 错误后检查恢复的步骤窗口大小 |
 
 Exit code：所有指标通过返回 `0`，任一指标失败返回 `1`。
 
@@ -203,6 +204,7 @@ trajeval compare baseline.json current.json --format markdown
 | `--threshold` | `0.7` | 指标通过/失败阈值 |
 | `--expected-steps` | — | 期望步骤数基线 |
 | `--baseline-tokens` | — | Token 用量基线 |
+| `--recovery-window` | `3` | 错误后检查恢复的步骤窗口大小 |
 
 `markdown` 格式输出适合直接贴到 GitHub PR 评论中。
 
@@ -253,6 +255,7 @@ trajeval calibrate annotations.jsonl judgments.jsonl --threshold 0.8
 | **tool_accuracy** | 工具调用的成功率。紧跟 error 步骤或输出包含错误标志的工具调用视为失败。 | `successful/total` |
 | **loop_detection** | 通过 n-gram 分析（bigram + trigram）检测重复步骤序列，惩罚重复模式。 | `1.0 - penalty`，penalty 与重复步骤数成正比 |
 | **token_efficiency** | Token 使用效率。无 `--baseline-tokens` 时比较有效 Token vs 总量（error 步骤的 Token 算浪费）。 | `min(baseline/actual, 1.0)` 或 `productive/total` |
+| **error_recovery** | 错误后恢复能力。对每个 error 步骤，检查后续 `--recovery-window` 步内是否有非 error 步骤。连续错误独立评估——每个 error 各自检查其窗口。 | `recovered/total_errors` |
 
 每个指标输出 0.0-1.0 的分数。分数 >= 阈值（默认 0.7）即为通过。
 
