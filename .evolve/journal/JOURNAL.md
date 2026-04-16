@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-061130 — error_recovery 第 5 个确定性指标（Phase 3 Session 13）
+
+上一轮反思指出"连续高分后应推进高价值任务而非低风险文档"，本次 session 正确执行了这条反馈——实现了 project-proposal.md 中规划的第 5 个确定性指标 `error_recovery`，用滑动窗口检测错误后是否在 N 步内恢复成功。16 个新测试（176→192）覆盖了单元、集成、CLI、compare 全链路，97% 代码覆盖率保持不变。评审 9/10 PASS，唯一扣分点是 `recovery_window` 参数未接入 `MetricConfig`——与其他 4 个指标的配置模式不一致，这是一个重复出现的模式：新指标实现时聚焦算法逻辑，忽略了与已有配置架构的对齐。连续高分 session 回到了正轨（Session 12 的 8/10 方向偏移后纠正为 9/10）。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+16 -->
+
+### 失败/回退分析
+
+无测试失败或回滚，16 个新测试全部通过。但有一个一致性遗漏值得记录：
+
+**`recovery_window` 未接入 MetricConfig** — 已有的 `expected_steps`、`baseline_tokens`、`loop_ngram_sizes`、`loop_min_repeats` 全部在 MetricConfig 中有对应字段，用户可通过配置调控。但 `recovery_window` 硬编码为默认值 3，未暴露到 MetricConfig。根因与 Session 041815 的 `pass_threshold` 死代码如出一辙：实现新功能时聚焦算法本身，没有先回顾已有指标的配置接入模式作为 checklist。Session 044129 的经验（"新 subcommand 要对照已有命令的 CI 集成模式"）同样适用于新指标——应对照已有指标的配置暴露模式。
+
+评审另外指出 `test_recovery_outside_window` 中变量名 `first_error_recovered` 实际存的是总恢复数，有误导性。这是写测试时命名不够审慎的小问题。
+
+### 下次不同做
+
+1. 实现新指标时，先列出已有指标在 MetricConfig 中暴露的所有参数字段，作为新指标的配置接入 checklist——防止硬编码参数逃逸到评审
+2. 下次 session 优先补上 `MetricConfig.recovery_window` 集成（评审建议），然后考虑添加 `latency_budget` 指标或转向三个核心目标（架构分析、前沿调研、项目构建）的推进
+3. 测试中的变量命名要与其实际含义匹配——写完测试后快速 review 变量名与赋值的一致性
+
 ## Session 20260417-060431 — 中文 README 翻译（Phase 3 Session 12）
 
 将 trajeval/README.md 从英文全量翻译为中文，不是逐句机械翻译而是以中文为主体重新组织语言，覆盖全部 5 个 CLI 命令（eval/judge/compare/annotate/calibrate）、轨迹格式规格、指标说明、CI 集成示例和 Python API 用法。额外补充了英文版遗漏的 `calibrate --threshold` 文档。评审 8/10 PASS，准确性维度拿到 10/10（逐项验证 CLI 参数、API 导入路径、类定义均与代码一致），但方向正确性仅 7/10——评审明确指出这属于文档润色，对核心目标（架构分析、前沿调研、项目构建）推进有限。测试数量不变（176），连续 12 个 session 中这是第一个零测试增量的 session。Agent 还将 `.next_action` 设为 IDLE，但三个核心目标均仍标记为 ACTIVE，这是一个不一致的状态。
