@@ -7,6 +7,8 @@ import pytest
 
 from trajeval.models import AgentTrace, TokenUsage, TraceStep
 from trajeval.scorer import (
+    ALL_DIMENSIONS,
+    DIMENSION_PROMPTS,
     JudgeConfig,
     JudgeDimension,
     JudgeResult,
@@ -60,6 +62,20 @@ def mock_api_response():
                 "score": 4,
                 "explanation": "Logical approach but the search was redundant.",
             },
+        ]
+    })
+
+
+@pytest.fixture
+def mock_5dim_response():
+    """A well-formed judge response with all 5 dimensions."""
+    return json.dumps({
+        "dimensions": [
+            {"name": "task_completion", "score": 5, "explanation": "Goal fully achieved."},
+            {"name": "reasoning_quality", "score": 4, "explanation": "Logical with minor detour."},
+            {"name": "tool_use_appropriateness", "score": 3, "explanation": "Redundant search call."},
+            {"name": "information_synthesis", "score": 4, "explanation": "Good integration of sources."},
+            {"name": "harm_avoidance", "score": 5, "explanation": "No unsafe actions taken."},
         ]
     })
 
@@ -231,8 +247,8 @@ class TestJudge:
         assert result.error is not None
         assert "anthropic" in result.error
 
-    def test_default_dimensions(self, sample_trace, mock_api_response):
-        client = _make_mock_client(mock_api_response)
+    def test_default_dimensions(self, sample_trace, mock_5dim_response):
+        client = _make_mock_client(mock_5dim_response)
         config = JudgeConfig()
         judge(sample_trace, config=config, client=client)
 
@@ -240,3 +256,85 @@ class TestJudge:
         user_msg = call_kwargs["messages"][0]["content"]
         assert "Task Completion" in user_msg
         assert "Reasoning Quality" in user_msg
+        assert "Tool Use Appropriateness" in user_msg
+        assert "Information Synthesis" in user_msg
+        assert "Harm Avoidance" in user_msg
+
+    def test_all_5_dimensions_scoring(self, sample_trace, mock_5dim_response):
+        client = _make_mock_client(mock_5dim_response)
+        result = judge(sample_trace, client=client)
+
+        assert result.error is None
+        assert len(result.dimensions) == 5
+        assert result.overall_score == round((5 + 4 + 3 + 4 + 5) / 25, 4)
+
+    def test_subset_dimensions(self, sample_trace, mock_api_response):
+        client = _make_mock_client(mock_api_response)
+        config = JudgeConfig(dimensions=["task_completion", "reasoning_quality"])
+        judge(sample_trace, config=config, client=client)
+
+        call_kwargs = client.messages.create.call_args.kwargs
+        user_msg = call_kwargs["messages"][0]["content"]
+        assert "Task Completion" in user_msg
+        assert "Reasoning Quality" in user_msg
+        assert "Tool Use Appropriateness" not in user_msg
+
+
+class TestDimensionPrompts:
+    def test_all_dimensions_have_prompts(self):
+        assert set(ALL_DIMENSIONS) == set(DIMENSION_PROMPTS.keys())
+        assert len(ALL_DIMENSIONS) == 5
+
+    def test_tool_use_prompt_in_build(self, sample_trace):
+        prompt = build_user_prompt(sample_trace, ["tool_use_appropriateness"])
+        assert "Tool Use Appropriateness" in prompt
+        assert "right tool for each subtask" in prompt
+
+    def test_information_synthesis_prompt_in_build(self, sample_trace):
+        prompt = build_user_prompt(sample_trace, ["information_synthesis"])
+        assert "Information Synthesis" in prompt
+        assert "integrated data from multiple sources" in prompt
+
+    def test_harm_avoidance_prompt_in_build(self, sample_trace):
+        prompt = build_user_prompt(sample_trace, ["harm_avoidance"])
+        assert "Harm Avoidance" in prompt
+        assert "destructive operations" in prompt
+
+    def test_all_5_in_single_prompt(self, sample_trace):
+        prompt = build_user_prompt(sample_trace, ALL_DIMENSIONS)
+        for dim_name, dim_text in DIMENSION_PROMPTS.items():
+            assert dim_text[:30] in prompt, f"Missing dimension: {dim_name}"
+
+
+class TestRandomization:
+    def test_randomize_order_false_preserves_order(self, sample_trace):
+        dims = ALL_DIMENSIONS
+        p1 = build_user_prompt(sample_trace, dims, randomize_order=False)
+        p2 = build_user_prompt(sample_trace, dims, randomize_order=False)
+        assert p1 == p2
+
+    def test_randomize_order_produces_different_orderings(self, sample_trace):
+        dims = ALL_DIMENSIONS
+        seen = set()
+        for _ in range(50):
+            prompt = build_user_prompt(sample_trace, dims, randomize_order=True)
+            lines = [l.strip() for l in prompt.split("\n") if l.strip().startswith("- ")]
+            first_dim = lines[0] if lines else ""
+            seen.add(first_dim)
+        assert len(seen) > 1, "Randomization should produce different orderings across 50 runs"
+
+    def test_randomize_does_not_mutate_input(self, sample_trace):
+        dims = list(ALL_DIMENSIONS)
+        original = list(dims)
+        build_user_prompt(sample_trace, dims, randomize_order=True)
+        assert dims == original, "Input list should not be mutated"
+
+    def test_judge_config_randomize_default(self):
+        config = JudgeConfig()
+        assert config.randomize_order is True
+
+    def test_judge_passes_randomize_to_prompt(self, sample_trace, mock_5dim_response):
+        client = _make_mock_client(mock_5dim_response)
+        config = JudgeConfig(randomize_order=False)
+        judge(sample_trace, config=config, client=client)
+        assert client.messages.create.call_count == 1

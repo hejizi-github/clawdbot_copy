@@ -15,7 +15,7 @@ from .calibration import AnnotationStore, HumanAnnotation, load_judge_results, c
 from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
-from .scorer import JudgeConfig, judge
+from .scorer import ALL_DIMENSIONS, JudgeConfig, judge
 
 console = Console()
 
@@ -94,7 +94,7 @@ def eval(
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
 @click.option(
     "--dimensions",
-    default="task_completion,reasoning_quality",
+    default=",".join(ALL_DIMENSIONS),
     help="Comma-separated dimensions to evaluate",
 )
 @click.option(
