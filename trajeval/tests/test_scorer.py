@@ -364,6 +364,14 @@ class TestEnsembleConfig:
         assert cfg.num_judges == 5
         assert cfg.aggregation == "mean"
 
+    def test_invalid_aggregation_rejected(self):
+        with pytest.raises(Exception):
+            EnsembleConfig(aggregation="mode")
+
+    def test_invalid_aggregation_rejected_empty(self):
+        with pytest.raises(Exception):
+            EnsembleConfig(aggregation="max")
+
 
 class TestAggregateDimensions:
     def _make_results(self, score_sets):
@@ -437,6 +445,34 @@ class TestAggregateDimensions:
             ))
         agg_dims, _ = _aggregate_dimensions(results, "median")
         assert agg_dims[0].explanation == "Mid"
+
+    def test_explanation_even_judges_picks_closest(self):
+        results = []
+        for score, expl in [(1, "Very low"), (2, "Low"), (4, "High"), (5, "Very high")]:
+            results.append(JudgeResult(
+                trace_id="test",
+                dimensions=[JudgeDimension(name="dim", score=score, explanation=expl)],
+                overall_score=0.5,
+                model="test-model",
+            ))
+        agg_dims, _ = _aggregate_dimensions(results, "median")
+        # median([1,2,4,5]) = 3.0, int(3.0) = 3; closest actual score is 2 or 4
+        assert agg_dims[0].score == 3
+        assert agg_dims[0].explanation in ("Low", "High")
+
+    def test_explanation_even_judges_mean_picks_closest(self):
+        results = []
+        for score, expl in [(1, "One"), (3, "Three"), (4, "Four"), (5, "Five")]:
+            results.append(JudgeResult(
+                trace_id="test",
+                dimensions=[JudgeDimension(name="dim", score=score, explanation=expl)],
+                overall_score=0.5,
+                model="test-model",
+            ))
+        agg_dims, _ = _aggregate_dimensions(results, "mean")
+        # mean([1,3,4,5]) = 3.25, round = 3; closest is score=3 -> "Three"
+        assert agg_dims[0].score == 3
+        assert agg_dims[0].explanation == "Three"
 
 
 class TestEnsembleJudge:

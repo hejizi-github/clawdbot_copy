@@ -105,10 +105,14 @@ def eval(
     help="Disable dimension order randomization (for reproducible evaluations)",
 )
 @click.option(
-    "--judges", type=int, default=1,
+    "--judges", type=click.IntRange(min=1), default=1,
     help="Number of judges for ensemble evaluation (default 1, use 3+ for high-stakes)",
 )
-def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold: float, no_randomize: bool, judges: int):
+@click.option(
+    "--aggregation", type=click.Choice(["median", "mean"]), default="median",
+    help="Aggregation method for ensemble scoring (default median)",
+)
+def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold: float, no_randomize: bool, judges: int, aggregation: str):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
         trace = ingest_json(trace_file)
@@ -123,7 +127,7 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
     )
 
     if judges > 1:
-        ensemble_config = EnsembleConfig(num_judges=judges)
+        ensemble_config = EnsembleConfig(num_judges=judges, aggregation=aggregation)
         result = ensemble_judge(trace, config=config, ensemble_config=ensemble_config)
     else:
         result = judge(trace, config=config)

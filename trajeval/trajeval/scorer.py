@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import math
 import random
 import re
 import statistics
+
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -233,7 +234,7 @@ class DimensionStat(BaseModel):
 
 class EnsembleConfig(BaseModel):
     num_judges: int = Field(default=3, ge=2, le=10)
-    aggregation: str = Field(default="median")
+    aggregation: Literal["median", "mean"] = Field(default="median")
 
 
 class EnsembleResult(BaseModel):
@@ -267,9 +268,11 @@ def _aggregate_dimensions(results: list[JudgeResult], aggregation: str) -> tuple
         else:
             agg_score = round(statistics.mean(scores))
 
-        median_idx = len(scores) // 2
-        sorted_pairs = sorted(zip(scores, dim_explanations[name]), key=lambda x: x[0])
-        explanation = sorted_pairs[median_idx][1]
+        closest_pair = min(
+            zip(scores, dim_explanations[name]),
+            key=lambda x: abs(x[0] - agg_score),
+        )
+        explanation = closest_pair[1]
 
         aggregated.append(JudgeDimension(
             name=name,

@@ -336,6 +336,55 @@ class TestJudgeCommand:
         assert "agreement" in data["ensemble"]
 
 
+    def test_judges_zero_rejected(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"), "--judges", "0",
+        ])
+        assert result.exit_code == 2
+
+    def test_judges_negative_rejected(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"), "--judges", "-1",
+        ])
+        assert result.exit_code == 2
+
+    @patch("trajeval.cli.ensemble_judge")
+    def test_aggregation_flag_flows_through(self, mock_ensemble):
+        mock_ensemble.return_value = EnsembleResult(
+            trace_id="test-trace-001",
+            dimensions=[
+                JudgeDimension(name="task_completion", score=4, explanation="test"),
+            ],
+            overall_score=0.8,
+            model="test-model",
+            num_judges=3,
+            aggregation="mean",
+            individual_results=[],
+            dimension_stats=[
+                DimensionStat(name="task_completion", median_score=4.0, mean_score=4.0, std_dev=0.5, scores=[3, 4, 5]),
+            ],
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"),
+            "--judges", "3", "--aggregation", "mean",
+        ])
+        assert result.exit_code == 0
+        call_kwargs = mock_ensemble.call_args
+        ensemble_config = call_kwargs.kwargs.get("ensemble_config") or call_kwargs[1].get("ensemble_config")
+        assert ensemble_config.aggregation == "mean"
+
+    def test_aggregation_invalid_rejected(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"),
+            "--judges", "3", "--aggregation", "mode",
+        ])
+        assert result.exit_code == 2
+
+
 class TestAnnotateDefaultDimensions:
     def test_annotate_defaults_to_all_dimensions(self, tmp_path):
         out = tmp_path / "ann.jsonl"
