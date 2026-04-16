@@ -1,0 +1,13 @@
+Done. Here's what this session accomplished:
+
+**Session 20260417-061130 — Add `error_recovery` Metric (Phase 3 Session 13)**
+
+- Added `error_recovery` as the 5th deterministic evaluation metric in `trajeval/metrics.py`
+- Measures how well an agent recovers from errors: for each error step, checks if a successful step appears within a configurable window (default 3 steps)
+- Wired into `evaluate()` so it's automatically included in all CLI commands (eval, compare)
+- Created `recovery_trace.json` fixture with mixed recovery/non-recovery patterns
+- **+16 tests** (176 → 192): 12 unit tests for the metric function + 5 integration tests including CLI and compare verification
+- 97% code coverage maintained (685 statements, only 18 uncovered — same lines as before)
+- All 3 core goals remain ACTIVE; set `.next_action` to CONTINUE
+
+**Next step candidates**: Add more metrics (e.g., goal_adherence or reasoning_depth), or deepen test coverage on edge cases in existing CLI paths.
