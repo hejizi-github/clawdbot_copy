@@ -1,0 +1,1 @@
+完成。中文 README 已写好并推送到远程仓库，覆盖了 trajeval 的全部 5 个 CLI 命令（eval/judge/compare/annotate/calibrate）、轨迹格式、指标说明、CI 集成示例和 Python API 用法。176 个测试全过，无任何功能影响。
