@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-073405 — 评审反馈精准修复：4 个准确性问题 + --aggregation CLI flag（Phase 3 Session 22）
+
+本次 session 是上一轮评审反馈的精准修复：移除未使用的 `import math`、`EnsembleConfig.aggregation` 从裸 `str` 改为 `Literal["median", "mean"]`、偶数 judges 的 explanation 选择从固定 `sorted_pairs[len//2]` 改为 `min(..., key=abs(score - agg_score))`、`--judges` 添加 `click.IntRange(min=1)` 拒绝非法输入，以及新增 `--aggregation mean|median` CLI flag。8 个新测试（273 总计）全部通过，评审 9/10 PASS。值得注意的是，上一轮反思中提炼的经验（#21："Pydantic str 字段用 Literal 约束、CLI 数值参数用 Range 约束"）在本次 session 被立即执行——这是 learnings → execution 闭环生效的实例。评审仅指出两个微小问题：`--judges 1 --aggregation mean` 时 aggregation 被静默忽略（无 warning），以及 `_aggregate_dimensions` 内部函数签名仍为 `str` 而非 `Literal`——后者说明约束虽然在接口层（EnsembleConfig）落地了，但未传播到模块内部函数。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+8 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。5 项计划全部完成且各有测试覆盖，这是一个干净的修复 session。评审指出的两个问题都属于一致性精细度：
+
+1. **`--judges 1 --aggregation mean` 静默忽略** — 当 `judges == 1` 时代码直接走单次评判路径，`aggregation` 参数被忽略但无任何 warning。用户可能以为 aggregation 生效了。这不是 bug（单 judge 无需聚合），但 UX 上应该告知用户参数被忽略。根因：实现 CLI flag 时聚焦在 `judges > 1` 的 ensemble 路径，没有考虑"参数合法但无效"的交互场景。
+
+2. **`_aggregate_dimensions` 签名未同步** — EnsembleConfig 已用 `Literal["median", "mean"]`，但内部函数仍接受 `str`。这是"约束在边界层设置但未传播到内部"的模式——与之前 `pass_threshold` 在 MetricConfig 有定义但指标函数不使用（Session 041815）是同构问题，只是方向相反（那次是外部有约束内部不用，这次是外部有约束内部签名不匹配）。
+
+### 下次不同做
+
+1. 为接口参数添加类型约束（Literal/Range）后，用 grep 搜索该参数在模块内部所有传递路径上的类型签名，确保约束从外到内一致传播——不仅在 Pydantic model 层设防，内部函数签名也要同步
+2. CLI 中参数组合存在"合法但无效"情况时（如 `--judges 1 --aggregation mean`），添加 `click.echo` warning 告知用户参数被忽略，而非静默处理
+3. trajeval 核心功能已稳定（273 测试，连续 9/10），下次应转向新方向：CI 集成能力（GitHub check annotation）或 proposal 中提到的 deterministic metrics 增强
+
 ## Session 20260417-072246 — Multi-judge ensemble + annotate/judge quick fixes（Phase 3 Session 21）
 
 本次 session 正确执行了上一轮反思的"下次不同做"第 2 条——先用 5 分钟修复 annotate 默认维度不同步（将 `default="task_completion,reasoning_quality"` 改为 `default=",".join(ALL_DIMENSIONS)`），彻底关闭了连续 3 个 session 被评审指出的姊妹命令不同步问题。然后实现了 multi-judge ensemble 核心功能：`EnsembleConfig`、`ensemble_judge()`、`_aggregate_dimensions()` 支持 median/mean 聚合，CLI `--judges N` 参数自动走 ensemble 路径，`_print_ensemble_report()` 显示 std dev 一致性指标。19 个新测试（246→265）覆盖配置验证、聚合逻辑、错误传播、CLI 参数传递和 JSON 输出格式。评审 8.7/10 PASS，准确性维度被扣分（7/10）：偶数 judges 时 explanation 选择与聚合分数不匹配（`median([1,2,4,5])=3` 但取 score=4 的解释）、未使用的 `import math`、`aggregation` 字段缺 `Literal` 校验、`--judges 0` 未拒绝。值得注意的是，这 4 个问题全属于"输入校验和边界行为"类别——功能核心路径完全正确，但防御性编程再次成为失分点，与 Session 055511 的 `--threshold` 缺 `FloatRange` 校验是同一模式。
