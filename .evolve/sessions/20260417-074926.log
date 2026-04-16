@@ -1,0 +1,8 @@
+Done. **Session 24 summary:**
+
+- **Added `--format ci` to the `judge` command** — the last CI integration gap. All three commands (`eval`, `compare`, `judge`) now support GitHub Actions annotations + Markdown summaries.
+- **Fixed `format_compare_ci` type annotation** — bare `result` → `result: ComparisonResult`.
+- **Fixed test imports** — replaced non-idiomatic `__import__("unittest.mock", ...)` with standard `from unittest.mock import patch`.
+- **13 new tests** (296 → 309), all passing, zero regressions.
+
+**Next:** Deterministic metrics enhancement (loop detection n-gram optimization, token efficiency baseline auto-inference) — the review's Priority 3 and proposal Phase 1 wrap-up.
