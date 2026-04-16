@@ -14,6 +14,8 @@ class MetricDelta(BaseModel):
     delta: float
     direction: str = Field(description="improved, regressed, or unchanged")
     is_regression: bool = False
+    baseline_details: dict | None = None
+    current_details: dict | None = None
 
 
 class ComparisonResult(BaseModel):
@@ -52,6 +54,8 @@ def compare_reports(
         c_score = current_map[name].score if name in current_map else 0.0
         delta = round(c_score - b_score, 4)
         direction, is_regression = _classify_direction(delta, tolerance)
+        b_details = baseline_map[name].details if name in baseline_map else None
+        c_details = current_map[name].details if name in current_map else None
         deltas.append(MetricDelta(
             name=name,
             baseline_score=b_score,
@@ -59,6 +63,8 @@ def compare_reports(
             delta=delta,
             direction=direction,
             is_regression=is_regression,
+            baseline_details=b_details or None,
+            current_details=c_details or None,
         ))
 
     overall_delta = round(current.overall_score - baseline.overall_score, 4)

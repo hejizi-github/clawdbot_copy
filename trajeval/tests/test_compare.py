@@ -25,6 +25,22 @@ def _make_report(
     )
 
 
+def _make_report_with_details(
+    trace_id: str,
+    metrics: list[tuple[str, float, bool, dict | None]],
+    overall: float,
+) -> EvalReport:
+    return EvalReport(
+        trace_id=trace_id,
+        metrics=[
+            MetricResult(name=n, score=s, passed=p, details=d or {})
+            for n, s, p, d in metrics
+        ],
+        overall_score=overall,
+        passed=all(p for _, _, p, _ in metrics),
+    )
+
+
 class TestClassifyDirection:
     def test_regression(self):
         direction, is_reg = _classify_direction(-0.1, tolerance=0.05)
@@ -147,6 +163,48 @@ class TestCompareReports:
         assert "only_baseline" in names
         assert "only_current" in names
         assert len(result.metric_deltas) == 2
+
+    def test_details_propagated_to_deltas(self):
+        baseline = _make_report_with_details(
+            "b1", [("er", 0.5, True, {"recovery_window": 1, "recovered": 2})], 0.5,
+        )
+        current = _make_report_with_details(
+            "c1", [("er", 0.7, True, {"recovery_window": 5, "recovered": 4})], 0.7,
+        )
+        result = compare_reports(baseline, current)
+        delta = result.metric_deltas[0]
+        assert delta.baseline_details == {"recovery_window": 1, "recovered": 2}
+        assert delta.current_details == {"recovery_window": 5, "recovered": 4}
+
+    def test_details_none_when_metric_has_empty_details(self):
+        baseline = _make_report("b1", [("m1", 0.8, True)], 0.8)
+        current = _make_report("c1", [("m1", 0.8, True)], 0.8)
+        result = compare_reports(baseline, current)
+        delta = result.metric_deltas[0]
+        assert delta.baseline_details is None
+        assert delta.current_details is None
+
+    def test_details_in_json_serialization(self):
+        baseline = _make_report_with_details(
+            "b1", [("m1", 0.8, True, {"key": "val"})], 0.8,
+        )
+        current = _make_report_with_details(
+            "c1", [("m1", 0.9, True, {"key": "new"})], 0.9,
+        )
+        result = compare_reports(baseline, current)
+        data = result.model_dump()
+        assert data["metric_deltas"][0]["baseline_details"] == {"key": "val"}
+        assert data["metric_deltas"][0]["current_details"] == {"key": "new"}
+
+    def test_misaligned_metric_details_none_for_missing_side(self):
+        baseline = _make_report_with_details(
+            "b1", [("m1", 0.8, True, {"info": 42})], 0.8,
+        )
+        current = _make_report("c1", [("m1", 0.7, True)], 0.7)
+        result = compare_reports(baseline, current)
+        delta = result.metric_deltas[0]
+        assert delta.baseline_details == {"info": 42}
+        assert delta.current_details is None
 
 
 class TestFormatMarkdown:

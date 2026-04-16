@@ -264,6 +264,18 @@ class TestCompareCommand:
         ])
         assert narrow.exit_code == 0
         assert wide.exit_code == 0
+        narrow_data = json.loads(narrow.output)
+        wide_data = json.loads(wide.output)
+        narrow_er = next(
+            d for d in narrow_data["metric_deltas"] if d["name"] == "error_recovery"
+        )
+        wide_er = next(
+            d for d in wide_data["metric_deltas"] if d["name"] == "error_recovery"
+        )
+        assert narrow_er["baseline_details"]["recovery_window"] == 1
+        assert narrow_er["current_details"]["recovery_window"] == 1
+        assert wide_er["baseline_details"]["recovery_window"] == 5
+        assert wide_er["current_details"]["recovery_window"] == 5
 
     def test_latency_budget_flag_flows_through(self):
         trace = str(FIXTURES_DIR / "simple_trace.json")
