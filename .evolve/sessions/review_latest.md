@@ -3,25 +3,26 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 精准修复上次评审指出的三个问题，直接推进代码质量和测试覆盖目标
-- 完成度 (25%): 9/10 — 计划的三项修复全部完成，新增 8 个测试（超出计划的 4 个最低要求），测试 129 → 137
-- 准确性 (20%): 9/10 — `click.style(dim, fg='cyan')` 是正确的 click 原生着色方案；函数重命名和 import 更新一致；测试断言逻辑正确，已验证全部通过
-- 一致性 (15%): 9/10 — 与 project-proposal.md 中的 calibration pipeline 设计一致，公共 API 命名更合理
-- 副作用 (10%): 9/10 — 改动干净隔离，仅涉及目标文件，无破坏性变更；`load_judge_results` 去掉下划线后无其他模块引用旧名
+- 方向正确性 (30%): 9/10 — 上次评审明确建议"优先补充 README 文档"，本次精准执行了这一建议，直接提升项目的外部可用性。
+- 完成度 (25%): 9/10 — 从 19 行骨架扩展到 ~325 行完整文档，覆盖安装、Quick Start、Trace 格式、5 个 CLI 命令、指标说明、CI 集成、Python API，无明显遗漏。
+- 准确性 (20%): 9/10 — 逐项核对源码：5 个 CLI 命令及选项、默认值（threshold=0.7, model=claude-sonnet-4-6, output=annotations.jsonl）、Trace JSON schema 字段、4 个 deterministic metrics 的名称和评分逻辑、pyproject.toml extras、Python API 函数签名和类名均与代码一致。唯一微瑕：Quick Start 示例输出的表格是示意性的，实际 rich 渲染可能略有不同，但这属于文档常规做法，不算错误。
+- 一致性 (15%): 9/10 — 与 project-proposal.md 中描述的功能完全对齐，未与其他策略文件矛盾。
+- 副作用 (10%): 10/10 — 仅修改 README.md，无代码变更，测试全部通过（137 tests），零破坏风险。
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- 严格按上次评审反馈逐项修复，形成了良好的 review → fix 闭环
-- 测试质量高：覆盖了正常路径（save annotations、JSON output）、边界条件（invalid score rejection、empty files）、自定义参数（custom annotator）和错误处理（bad JSON input）
-- `_make_fixtures` helper 方法设计合理，构造了真实的 annotation/judgment 数据对，测试可读性好
-- Rich markup bug 的修复方案准确 — `click.style()` 是 click 生态的标准着色方式
+- 文档结构清晰：从概览 → 安装 → Quick Start → 格式规范 → CLI 参考 → 指标 → CI → API，逻辑递进，适合新用户从上到下阅读
+- Trace Format 部分同时提供了 JSON 示例和字段表格，兼顾可读性和参考性
+- CLI 每个命令都有选项表 + 示例 + exit code 语义，对 CI 集成非常友好
+- Python API 示例覆盖了 deterministic eval 和 LLM judge 两条路径
+- 计划中明确列出了"不写什么"（Contributing、Changelog、Badges），判断合理
 
 **需要改进的地方**:
-- `test_rejects_invalid_score_then_accepts` 只测了一种越界情况（9），可考虑补充负数或非数字字符的测试（不阻塞，建议级别）
-- `calibrate` 的 `test_table_output` 断言较弱（仅检查 "Calibration" 在输出中），可考虑验证维度名或 Spearman 相关值出现在表格中
+- Quick Start 的 trace 示例中 `"type": "tool_call"` 步骤缺少 `tokens` 字段，虽然 tokens 是 optional 的，但为了展示完整性建议加上（哪怕是 null 或 0），避免用户困惑为什么 eval 输出里 token_efficiency 是 1.0
+- Python API 示例中 `ingest_json({"trace_id": "t1", "steps": [...]})` 用了 `...` 省略号，作为可运行示例不够友好，建议补一个最小完整 dict
+- README 底部的 License: MIT 未与 pyproject.toml 或项目根目录的 LICENSE 文件交叉验证，如果实际没有 LICENSE 文件，建议要么创建一个要么暂时移除该 section
 
 **下次 session 的建议**:
-- 项目已具备完整的 eval/judge/compare/annotate/calibrate CLI 闭环，建议优先补充 README 文档使项目对外可用（安装方式、CLI 用法示例、trace 格式说明）
-- 或推进 OTLP trace format 支持，扩展 ingester 对真实 agent 框架输出的兼容性
-- 测试覆盖已经很好（137 个），后续可关注集成测试的端到端场景（如 eval → judge → calibrate 全流程）
+- Agent 日志提到两个方向：OTLP trace format 支持 或 end-to-end 集成测试。建议优先做**集成测试**——目前 session_metrics 显示 test_count 一直为 0，而考核指标明确包含"测试覆盖 ↑"，这是当前最大短板
+- 集成测试应覆盖 eval → judge → calibrate 完整 pipeline，至少验证 CLI exit code 语义（这也是 README 承诺的行为契约）
