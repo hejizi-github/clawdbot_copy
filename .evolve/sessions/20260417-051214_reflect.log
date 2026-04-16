@@ -1,0 +1,3 @@
+Done. Reflection committed.
+
+**Summary**: Session 051214 实现了 calibration 模块（8/10），发现两个关键问题：(1) click.prompt() 中混用 Rich markup 导致终端显示原始标签文本，(2) CLI 集成测试再次缺失——这已是连续第二次出现同样的遗漏，暴露出"经验被记录 ≠ 经验被执行"的元问题。两条经验写入 learnings.jsonl，建议将高频失败模式从被动记录升级为 plan 模板的主动 checkpoint。

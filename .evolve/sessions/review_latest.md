@@ -3,27 +3,27 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 直接响应上次 review 的 Priority 1（CLI 集成测试），推进"测试覆盖 ↑"核心指标
-- 完成度 (25%): 9/10 — 计划的三项（threshold 统一、CLI 测试、misaligned metrics 测试）全部完成，实际交付 18 个 CLI 测试超出计划的 9 个
-- 准确性 (20%): 8/10 — "89 → 110 tests" 经验证属实；`test_error_trace_has_lower_scores` 名称暗示比较但实际只检查 key 存在，断言偏弱
-- 一致性 (15%): 9/10 — threshold 0.7 统一后 eval/judge/compare 三个命令完全一致，与 project-proposal 的设计意图吻合
-- 副作用 (10%): 10/10 — 变更隔离干净，cli.py 仅修改两处默认值，测试文件为新建或追加，110/110 通过，ruff clean
+- 方向正确性 (30%): 9/10 — 直接实现了 project-proposal Section 3.4 的"key differentiator"校准模块，方向完全正确
+- 完成度 (25%): 8/10 — 核心模块（存储、相关性分析）完整，19 个测试覆盖全面；但计划中提到的 CLI 集成测试（annotate/calibrate 命令）未实现
+- 准确性 (20%): 7/10 — 统计逻辑（Spearman）正确；但有两个实际问题：(1) `annotate` 命令中 `click.prompt()` 使用了 Rich markup `[cyan]{dim}[/cyan]`，click.prompt 不渲染 Rich，用户会看到原始标签文字；(2) `_load_judge_results` 作为私有函数被跨模块导入到 cli.py
+- 一致性 (15%): 9/10 — 与 proposal 的 Section 3.4 前两项（annotation collection、correlation analysis）完全对齐，Pearson 和 drift detection 留作后续合理
+- 副作用 (10%): 9/10 — 改动干净隔离，test_cli.py 仅做了上次 reviewer 建议的重命名，无破坏
 
-**加权总分**: 9/10
+**加权总分**: 8/10
 
 **做得好的地方**:
-- 计划精确且执行到位，plan 文件和实际 diff 高度一致
-- CLI 测试覆盖面广：exit code、JSON 输出可解析、error handling、format 选项、default threshold 验证均有覆盖
-- judge 命令测试合理使用 mock 避免 LLM 调用，compare 命令测试使用真实 fixture 做端到端验证
-- misaligned metrics 三个边界测试（baseline 多、current 多、完全不交叉）覆盖了 compare_reports 的 union-key 逻辑
-- 测试执行快（0.17s），不拖累 CI
+- 测试设计出色：19 个测试覆盖了正常路径（perfect/weak correlation）、边界（constant scores、empty inputs、no matching pairs）、验证（score range、defaults），测试命名清晰
+- `compute_correlation` 逻辑健壮：正确处理了 pairs < 3 跳过、constant scores 警告、per-dimension 分拆，体现了对统计方法限制条件的理解
+- CLI 设计合理：`calibrate` 用 positional args 替代了计划中的 `--annotations/--judgments` flags，更简洁
+- 遵循了 reviewer 上次的反馈（重命名 test_error_trace_has_lower_scores → test_error_trace_parseable）
 
 **需要改进的地方**:
-- `test_error_trace_has_lower_scores`（test_cli.py L67-74）名称暗示应对比 simple_trace 和 error_trace 的分数差异，但实际只断言 `"overall_score" in data`。建议改为：要么和 simple_trace 的分数做对比断言，要么改名为 `test_error_trace_parseable`
-- 没有测试 `--dimensions` 参数对 judge 命令的影响（自定义维度列表）。目前 judge 测试只覆盖默认维度
-- eval 命令的 `--expected-steps` 和 `--baseline-tokens` 选项未在 CLI 测试中覆盖
+- **Bug: Rich markup 泄漏到 click.prompt**（`cli.py:222-224`）：`click.prompt(f"Score for [cyan]{dim}[/cyan] (0-5)")` 中的 `[cyan]...[/cyan]` 不会被 click 渲染，用户会看到原始标签。修复方案：用 `console.print(f"Score for [cyan]{dim}[/cyan] (0-5): ", end="")` + `input()` 或直接去掉 Rich 标签改为纯文本
+- **私有函数跨模块导入**（`cli.py:14`）：`from .calibration import _load_judge_results` 导入了私有函数。应将 `_load_judge_results` 重命名为 `load_judge_results`（去掉下划线前缀），既然它是 CLI 需要的公共接口
+- **`total_pairs` 语义可能误导**：当 dimension 的 pairs < 3 时被跳过不计入 `total_pairs`，但 `total_pairs` 这个名字暗示"所有匹配对数"。考虑重命名为 `correlated_pairs` 或在 CalibrationResult 中额外加一个 `matched_pairs` 字段
+- **缺少 CLI 集成测试**：计划明确列出 "CLI: annotate saves correctly, calibrate outputs valid results"，但实际未实现。annotate 可用 `CliRunner` + monkeypatch input 测试，calibrate 可用临时 JSONL fixtures 测试
 
 **下次 session 的建议**:
-- 按 log 中计划推进 Priority 2：calibration 模块或 judge 维度扩展（proposal Session 5）
-- 如果选择 calibration，建议先在 `strategies/` 写一个简短的 calibration 设计文档再动手编码，因为这涉及 scorer 和 metrics 模块的交互
-- 可顺手修复 `test_error_trace_has_lower_scores` 的弱断言问题
+- **Priority 1**: 修复 click.prompt Rich markup bug + 添加 annotate/calibrate 的 CLI 集成测试（还技术债）
+- **Priority 2**: 将 `_load_judge_results` 变为公共 API，添加 `load_judge_results` 或将其移到更合适的模块（如 `io.py`）
+- **Priority 3**: 按 proposal 继续推进 — OTLP trace format support 或 README 文档，让项目对外可用

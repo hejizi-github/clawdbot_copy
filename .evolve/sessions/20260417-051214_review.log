@@ -1,0 +1,8 @@
+Review complete. **Verdict: PASS (8/10)**
+
+Key findings:
+- Calibration module is well-designed with solid test coverage (19 tests, all passing)
+- Correctly implements Spearman correlation with proper edge case handling
+- **One real bug**: `click.prompt()` at `cli.py:222` contains Rich markup tags that won't render — users see raw `[cyan]...[/cyan]` text
+- Minor issues: private function `_load_judge_results` imported cross-module, missing CLI integration tests that were in the plan
+- Direction is spot-on — this is the "key differentiator" from the project proposal
