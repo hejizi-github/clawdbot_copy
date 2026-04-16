@@ -1,0 +1,9 @@
+Done. Fixed all 4 review issues and added `--aggregation` CLI flag:
+
+1. **Removed unused `import math`** (scorer.py)
+2. **`EnsembleConfig.aggregation`** now uses `Literal["median", "mean"]` — invalid values rejected at validation
+3. **Even-judges explanation mismatch** fixed — now picks the judge whose score is closest to the aggregated score via `min(..., key=abs(score - agg_score))`
+4. **`--judges 0`/negative** rejected via `click.IntRange(min=1)`
+5. **`--aggregation mean|median`** exposed as CLI flag, flows through to `EnsembleConfig`
+
+8 new tests (273 total), all passing. Pushed to remote.
