@@ -3,26 +3,28 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 确定性指标模块已连续 8 次 9/10 后转向 LLM-as-judge 是正确的优先级判断，5 维度 + 偏差缓解直接对齐 proposal section 3.3
-- 完成度 (25%): 8/10 — 5 个维度 prompt、randomize_order、CLI 同步、12 个新测试均已完成；但 `annotate` 命令的 `--dimensions` 默认值仍硬编码为 2 维度（cli.py:228），与 `judge` 命令不一致
-- 准确性 (20%): 9/10 — 维度描述与 proposal 表格吻合；归一化公式 `(5+4+3+4+5)/25 = 0.84` 正确；randomize 实现正确复制列表避免突变；246 测试全部通过
-- 一致性 (15%): 8/10 — 与 proposal 3.3 高度一致（5 维度名称和描述完全匹配，bias mitigation 通过 randomized ordering 实现）；`annotate` 命令的默认维度未同步是唯一的不一致点
-- 副作用 (10%): 9/10 — 变更干净隔离，`build_user_prompt` 新增 `randomize_order` 参数使用 keyword-only 且默认 False，不影响已有调用方
+- 方向正确性 (30%): 9/10 — Multi-judge ensemble 直接提升 LLM-as-judge 可靠性，是 project proposal 路线图的核心能力；两个 quick fix 响应了连续多轮评审反馈。
+- 完成度 (25%): 9/10 — 计划中的三项全部落地（annotate 默认值同步、--no-randomize、ensemble），19 个新测试覆盖充分，README 同步更新。
+- 准确性 (20%): 7/10 — 存在两个小问题：(1) 偶数 judges 时 explanation 选择与聚合分数不匹配（`median([1,2,4,5])=3` 但 explanation 取 `sorted_pairs[2]` 即 score=4 的解释）；(2) `import math` 未使用；(3) `EnsembleConfig.aggregation` 没有校验合法值（传入 "mode" 会静默走 mean 分支）。
+- 一致性 (15%): 9/10 — 与 project-proposal.md 的 Phase 3 路线图完全对齐，ensemble 是明确规划的能力项。
+- 副作用 (10%): 10/10 — 改动干净隔离，所有 265 个测试通过，无回归。
 
-**加权总分**: 9×0.3 + 8×0.25 + 9×0.2 + 8×0.15 + 9×0.1 = 2.7 + 2.0 + 1.8 + 1.2 + 0.9 = **8.6/10**
+**加权总分**: 9 (8.7 四舍五入)
 
 **做得好的地方**:
-- 维度 prompt 质量高：每个都有清晰的评估焦点和 3 个考量点，与 proposal 描述精确对齐
-- randomize_order 实现干净：复制输入列表避免副作用，keyword-only 参数，默认行为向后兼容
-- 测试覆盖全面：TestDimensionPrompts（5 tests）验证 prompt 内容，TestRandomization（5 tests）覆盖了顺序保持、随机性统计验证、输入不可变性
-- CLI 的 `--dimensions` 默认值通过 `ALL_DIMENSIONS` 常量保持与 scorer 模块同步，避免了硬编码重复
+- Ensemble 设计清晰：`EnsembleConfig` → `ensemble_judge` → `_aggregate_dimensions` 职责分明，数据流一目了然
+- 测试覆盖全面：19 个新测试涵盖配置验证、聚合逻辑（median/mean）、统计计算、错误传播、CLI 参数传递、JSON 输出格式
+- `EnsembleResult` 继承 `JudgeResult` 同名字段而非用继承，避免了 Pydantic 模型继承的陷阱，`isinstance` 检查在 CLI 层干净区分两种输出路径
+- 终于修复了 annotate 默认维度不同步问题（连续 3 个 session 被评审指出）
+- `_print_ensemble_report` 的 std dev 颜色阈值（<0.5 绿、<1.0 黄、else 红）是合理的 UX 设计
 
 **需要改进的地方**:
-- `annotate` 命令（cli.py:228）的 `--dimensions` 默认值仍为 `"task_completion,reasoning_quality"`，应同步更新为 `",".join(ALL_DIMENSIONS)` 或保持 2 维度但添加注释说明原因（交互式标注 5 维度可能太繁琐，如果是有意为之则需注释）
-- `test_judge_passes_randomize_to_prompt` 只验证 API 被调用了 1 次，没有验证 `randomize_order=False` 实际传递到了 `build_user_prompt`——可以 mock `build_user_prompt` 或检查多次调用生成的 prompt 一致性来加强断言
-- 缺少 `--no-randomize` CLI flag（log 中 Next Steps 已提到），这对可复现评估很重要
+- **偶数 judges 的 explanation 不匹配聚合分数**（`scorer.py:270-272`）：当 judges 为偶数时，`statistics.median` 取两个中间值的均值，`int()` 截断后的分数可能不对应任何一个 judge 的实际分数，而 explanation 取 `sorted_pairs[len//2]` 是偏高的那个。建议：找到分数最接近聚合分数的 judge 的 explanation，或拼接多个 explanation。
+- **`import math` 未使用**（`scorer.py:6`）：删除即可。
+- **`EnsembleConfig.aggregation` 缺乏校验**：应限制为 `Literal["median", "mean"]`，否则传入无效值会静默走 mean 分支而非报错。
+- **`--judges 0` 或负数不会报错**：CLI 层 `judges > 1` 的判断让 0 和负数静默走单 judge 路径。建议加 `click.IntRange(min=1)` 或在 else 分支校验。
 
 **下次 session 的建议**:
-- 优先修复 `annotate` 命令的维度默认值不一致问题（5 分钟修复）
-- 推进 multi-judge ensemble（proposal 3.3 中描述的 2-3 judges majority vote），这是 LLM-as-judge 模块的下一个高价值特性
-- 为 `judge` CLI 添加 `--no-randomize` flag，支持可复现评估场景
+- 修复上面提到的 4 个小问题（预计 10-15 分钟）
+- 考虑暴露 `--aggregation mean|median` CLI flag（已在 log 中提及）
+- 推进 calibration module（proposal 3.4）：这是验证 LLM-as-judge 准确性的关键能力，与 ensemble 形成互补——ensemble 提高一致性，calibration 验证准确性

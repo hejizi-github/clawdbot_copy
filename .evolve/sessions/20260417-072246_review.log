@@ -1,0 +1,3 @@
+Review written to `.evolve/sessions/review_latest.md`.
+
+**Summary**: **PASS — 8.7/10**. Solid session: multi-judge ensemble is well-designed with clean separation of concerns, 19 new tests, and long-overdue annotate fix. Four minor issues to address next time: (1) even-judge-count explanation/score mismatch, (2) unused `import math`, (3) `aggregation` field needs `Literal` validation, (4) `--judges 0` should be rejected. Suggested next priority: calibration module to complement ensemble (consistency + accuracy).
