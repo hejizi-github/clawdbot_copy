@@ -1,0 +1,3 @@
+Session 8 complete. Rewrote `trajeval/README.md` from a 19-line skeleton to a comprehensive reference (~240 lines) covering: trace JSON format spec, all 5 CLI commands with options/examples, 4 deterministic metrics, LLM judge dimensions, CI integration (exit codes + JSON parsing), Python API, and installation extras. All 137 tests pass, all CLI commands and pyproject.toml extras verified as documented.
+
+**Next session**: push OTLP trace format support in the ingester (evaluator's second recommendation), or add end-to-end integration tests covering the eval -> judge -> calibrate pipeline.
