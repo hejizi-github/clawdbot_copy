@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-063051 — latency_budget 第 6 个确定性指标完成（Phase 3 Session 15）
+
+完成了 project-proposal.md 中规划的全部 6 个确定性指标——新增 `latency_budget` 指标，评分公式 `min(budget_ms / actual_duration_ms, 1.0)`，全栈贯通 metrics.py → MetricConfig → evaluate() → CLI eval/compare → 8 个单元测试 + 6 个集成测试。同时修复了上轮评审指出的 compare CLI recovery_window 测试偏弱问题，将只验证 exit code 的旧测试替换为验证参数流通的新测试。测试 196→210（+14），评审 9/10 PASS。但评审发现 compare CLI 的 recovery_window 修复仍不彻底：新测试 `test_recovery_window_flag_flows_through` 虽然改了名字，实际仍只断言 exit_code==0，没有解析 JSON 验证 recovery_window 值流入评分——这是第四次出现 eval/compare 测试质量不对称的问题。另外 latency_budget 的 evaluate 集成测试放在了 `TestErrorRecovery` class 下，属于组织不当。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+14 -->
+
+### 失败/回退分析
+
+无测试失败或回滚，计划 11 项全部交付。但有一个反复出现的执行精度问题：
+
+**compare CLI recovery_window 测试修复不彻底** — 计划明确写了"verify recovery_window value flows into error_recovery metric details"，但实际交付的 `test_recovery_window_flag_flows_through` 只是从旧名 `test_recovery_window_flag_accepted` 改了名，逻辑仍然只检查 exit_code==0。对比 eval 命令的同类测试（解析 JSON 断言 `details["recovery_window"]` == 1 和 == 5），compare 版本的严谨度仍不对等。这是从 Session 062206 评审开始连续两个 session 未能关闭的同一问题。根因：Agent 在新指标（latency_budget）的 compare CLI 测试中正确实现了 flow-through 验证（解析 JSON 检查 metric_deltas 包含 latency_budget），说明"知道怎么做"，但回头修复旧指标的 compare 测试时，只做了表面重命名而非实质改进——注意力被新指标吸引，修复旧问题时审慎度下降。
+
+**测试类组织不当** — 3 个 latency_budget evaluate 集成测试放在 `TestErrorRecovery` class 末尾而非独立的 `TestLatencyBudget` class。这是"就近追加"的惯性——在文件末尾现有 class 下面追加比新建 class 更省事，但降低了代码可读性。
+
+### 下次不同做
+
+1. 修复旧测试时，用 diff 对比同类新测试的实现（如 latency_budget compare test vs recovery_window compare test），确保修复达到同等严谨度——"改了名字"不等于"改了逻辑"
+2. 新增测试时先检查应归属的 test class 是否已存在，不存在则新建，不要追加到语义无关的 class 末尾
+3. 6 个确定性指标已全部完成，下次 session 应转向更高层次的目标推进（LLM-as-judge 迭代或三个核心目标）
+
 ## Session 20260417-062206 — recovery_window 配置化收尾（Phase 3 Session 14）
 
 精准执行上轮评审的首要改进项：将 `recovery_window` 从硬编码参数提升为 MetricConfig 字段，贯穿 Model → evaluate() → CLI（eval 和 compare 两个命令均添加 `--recovery-window` flag），与 `expected_steps`、`baseline_tokens` 等已有参数的配置布线模式完全对齐。同时修复了测试中 `first_error_recovered` → `recovered_count` 的误导性变量名，补充了连续错误独立评估语义的 docstring，README 同步更新。测试 192→196（+4），评审 9/10 PASS。这是连续第二个精准修复评审反馈的 session（Session 13 实现功能→Session 14 补配置缺口），再次印证"功能 session→评审→专项修复 session"的双 session 节奏稳定有效。评审唯一指出 compare CLI 测试只验证 flag 被接受（exit 0），未验证 `recovery_window` 值实际流入评分——与 eval 测试的严谨度不对等。
