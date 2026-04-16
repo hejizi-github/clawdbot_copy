@@ -245,7 +245,11 @@ def annotate(trace_file: Path, output: Path, dimensions: str, annotator: str):
 @click.argument("annotations_file", type=click.Path(exists=True, path_type=Path))
 @click.argument("judgments_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
-def calibrate(annotations_file: Path, judgments_file: Path, fmt: str):
+@click.option(
+    "--threshold", type=float, default=None,
+    help="Minimum Spearman ρ to pass (0.0-1.0). Exit 1 if below. Omit to skip pass/fail check.",
+)
+def calibrate(annotations_file: Path, judgments_file: Path, fmt: str, threshold: float | None):
     """Compute correlation between human annotations and LLM judge scores."""
     store = AnnotationStore(annotations_file)
     annotations = store.load()
@@ -264,14 +268,22 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str):
         sys.exit(1)
 
     result = compute_correlation(annotations, judge_results)
+    passed = result.overall_spearman_rho >= threshold if threshold is not None else None
 
     if fmt == "json":
-        click.echo(json.dumps(result.model_dump(), indent=2))
+        output = result.model_dump()
+        if threshold is not None:
+            output["passed"] = passed
+            output["threshold"] = threshold
+        click.echo(json.dumps(output, indent=2))
     else:
-        _print_calibration(result)
+        _print_calibration(result, threshold=threshold, passed=passed)
+
+    if threshold is not None:
+        sys.exit(0 if passed else 1)
 
 
-def _print_calibration(result):
+def _print_calibration(result, threshold: float | None = None, passed: bool | None = None):
     table = Table(title="Calibration: Human vs LLM-Judge")
     table.add_column("Dimension", style="cyan")
     table.add_column("Spearman ρ", justify="right")
@@ -307,6 +319,10 @@ def _print_calibration(result):
         str(result.total_pairs),
     )
     console.print(table)
+
+    if threshold is not None:
+        label = "[green bold]PASS[/green bold]" if passed else "[red bold]FAIL[/red bold]"
+        console.print(f"\nThreshold: ρ ≥ {threshold:.2f}  {label}")
 
     for w in result.warnings:
         console.print(f"[yellow]⚠ {w}[/yellow]")

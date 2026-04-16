@@ -67,8 +67,10 @@ class FakeAnthropicClient:
     def __init__(self, scores: dict[str, int] | None = None):
         self._scores = scores or {"task_completion": 4, "reasoning_quality": 3}
         self.messages = self
+        self.call_count = 0
 
     def create(self, **kwargs):
+        self.call_count += 1
         dims = []
         for name, score in self._scores.items():
             dims.append({"name": name, "score": score, "explanation": f"Test: {name}"})
@@ -229,6 +231,7 @@ class TestJudgeWithFakeClient:
             "--threshold", "0.7",
         ])
         assert r.exit_code == 0
+        assert high_client.call_count > 0, "fake client was not invoked — sys.modules mock may be ineffective"
 
         low_client = FakeAnthropicClient({"task_completion": 1, "reasoning_quality": 1})
         fake_anthropic_low = type("FakeAnthropicModule", (), {
@@ -240,6 +243,7 @@ class TestJudgeWithFakeClient:
             "--threshold", "0.7",
         ])
         assert r.exit_code == 1
+        assert low_client.call_count > 0, "fake client was not invoked — sys.modules mock may be ineffective"
 
 
 class TestCalibrationPipeline:
@@ -612,18 +616,16 @@ class TestBoundaryScenarios:
         with pytest.raises(IngestError, match="must be a list"):
             ingest_json({"steps": "not a list"})
 
-    def test_empty_trace_cli_eval(self):
+    def test_empty_trace_cli_eval(self, tmp_path):
         """CLI eval on empty trace should still produce valid output."""
-        import tempfile
+        trace_file = tmp_path / "empty_trace.json"
+        trace_file.write_text(json.dumps(self.EMPTY_TRACE))
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(self.EMPTY_TRACE, f)
-            f.flush()
-            runner = CliRunner()
-            r = runner.invoke(main, [
-                "eval", f.name, "--format", "json", "--threshold", "0.5",
-            ])
-            assert r.exit_code == 0
-            data = json.loads(r.output)
-            assert data["overall_score"] == 1.0
-            assert data["passed"] is True
+        runner = CliRunner()
+        r = runner.invoke(main, [
+            "eval", str(trace_file), "--format", "json", "--threshold", "0.5",
+        ])
+        assert r.exit_code == 0
+        data = json.loads(r.output)
+        assert data["overall_score"] == 1.0
+        assert data["passed"] is True

@@ -322,3 +322,95 @@ class TestCalibrateCommand:
         result = runner.invoke(main, ["calibrate", str(ann), str(empty)])
         assert result.exit_code == 1
         assert "No judge results" in result.output
+
+    def test_threshold_pass_exit_0(self, tmp_path):
+        ann, jdg = self._make_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "calibrate", str(ann), str(jdg), "--threshold", "0.8",
+        ])
+        assert result.exit_code == 0
+
+    def test_threshold_fail_exit_1(self, tmp_path):
+        ann, jdg = self._make_weak_correlation_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "calibrate", str(ann), str(jdg), "--threshold", "0.8",
+        ])
+        assert result.exit_code == 1
+
+    def test_threshold_json_includes_passed_and_threshold(self, tmp_path):
+        ann, jdg = self._make_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "calibrate", str(ann), str(jdg),
+            "--format", "json", "--threshold", "0.8",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["passed"] is True
+        assert data["threshold"] == 0.8
+
+    def test_threshold_json_fail_shows_false(self, tmp_path):
+        ann, jdg = self._make_weak_correlation_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "calibrate", str(ann), str(jdg),
+            "--format", "json", "--threshold", "0.8",
+        ])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["passed"] is False
+
+    def test_no_threshold_omits_passed_from_json(self, tmp_path):
+        ann, jdg = self._make_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "calibrate", str(ann), str(jdg), "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "passed" not in data
+        assert "threshold" not in data
+
+    def test_no_threshold_always_exit_0(self, tmp_path):
+        ann, jdg = self._make_weak_correlation_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "calibrate", str(ann), str(jdg),
+        ])
+        assert result.exit_code == 0
+
+    def _make_weak_correlation_fixtures(self, tmp_path):
+        """Human and judge scores that weakly correlate (rho < 0.8)."""
+        annotations_file = tmp_path / "weak_ann.jsonl"
+        judgments_file = tmp_path / "weak_jdg.jsonl"
+
+        annotations = [
+            HumanAnnotation(trace_id="t1", dimension="task_completion", human_score=5),
+            HumanAnnotation(trace_id="t2", dimension="task_completion", human_score=4),
+            HumanAnnotation(trace_id="t3", dimension="task_completion", human_score=3),
+            HumanAnnotation(trace_id="t4", dimension="task_completion", human_score=2),
+            HumanAnnotation(trace_id="t5", dimension="task_completion", human_score=1),
+        ]
+        with open(annotations_file, "w") as f:
+            for a in annotations:
+                f.write(a.model_dump_json() + "\n")
+
+        judgments = [
+            JudgeResult(trace_id="t1", overall_score=0.6, model="test",
+                        dimensions=[JudgeDimension(name="task_completion", score=3, explanation="ok")]),
+            JudgeResult(trace_id="t2", overall_score=0.8, model="test",
+                        dimensions=[JudgeDimension(name="task_completion", score=5, explanation="great")]),
+            JudgeResult(trace_id="t3", overall_score=0.4, model="test",
+                        dimensions=[JudgeDimension(name="task_completion", score=2, explanation="weak")]),
+            JudgeResult(trace_id="t4", overall_score=0.6, model="test",
+                        dimensions=[JudgeDimension(name="task_completion", score=4, explanation="good")]),
+            JudgeResult(trace_id="t5", overall_score=0.2, model="test",
+                        dimensions=[JudgeDimension(name="task_completion", score=1, explanation="bad")]),
+        ]
+        with open(judgments_file, "w") as f:
+            for j in judgments:
+                f.write(j.model_dump_json() + "\n")
+
+        return annotations_file, judgments_file
