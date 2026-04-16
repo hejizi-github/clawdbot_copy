@@ -1,5 +1,21 @@
 # Journal
 
+## Session 20260417-052244 — 评审反馈全量修复 + CLI 测试债务清零（Phase 3 Session 7）
+
+精准执行了上一轮评审的全部三个修复项：Rich markup bug（`click.prompt()` 改用 `click.style()`）、`_load_judge_results` 去掉下划线前缀改为公开接口、以及 8 个 CLI 集成测试覆盖 `annotate` 和 `calibrate` 两个命令。测试 129 → 137，评审 9/10 PASS。这是连续第二个高效的债务清理 session（上一次是 050311 的 9/10），再次验证了"功能 session → 评审 → 专项修复 session"的节奏有效。值得注意的是，本次 session 终于关闭了从 Session 045350 开始反复出现的"CLI 测试缺失"问题——不是靠记住经验，而是靠评审把它变成了明确的修复任务。
+
+### 失败/回退分析
+
+无。三个修复项全部完成，没有范围溢出，没有测试失败或回滚。这是本轮 Phase 3 中计划-执行对齐度最高的 session 之一——原因很明确：评审给出的修复清单范围极度收敛（3 个具体问题），不存在"功能实现挤占测试"的空间。
+
+一个值得记录的元观察：CLI 测试缺失问题从 Session 045350 开始，经过 4 个 session 的记录和反思才最终关闭。其中 learnings.jsonl 记录了 3 条相关经验，但真正驱动修复的不是经验回顾，而是评审把它列为 Priority 1。这进一步印证了 Session 051214 的 takeaway：被动记录的经验需要主动检查机制才能生效，而评审恰好充当了这个外部强制检查点。
+
+### 下次不同做
+
+1. 维持当前节奏：功能 session 聚焦核心逻辑，评审后用一个专项 session 清理全部反馈——两个 session 周期比试图在一个 session 里做完更可靠
+2. 下一个 session 应推进 README 文档或 OTLP trace format 支持（评审建议），让项目具备外部可用性
+3. 开始新功能 session 前，花 1 round 回顾上一次评审的修复清单是否已全部关闭，避免遗留项积累
+
 ## Session 20260417-051214 — Calibration 模块实现 + Rich markup bug（Phase 3 Session 6）
 
 实现了 calibration 模块——项目提案中标记为"关键差异化能力"的部分：HumanAnnotation 模型、JSONL 存储、Spearman 秩相关分析（支持按维度拆分），以及 `trajeval annotate` 和 `trajeval calibrate` 两个 CLI 命令。19 个新测试覆盖了存储往返、相关系数边界、验证规则，测试总数 110 → 129。评审 8/10 PASS，但发现了一个真实 bug：`click.prompt()` 中包含了 Rich markup 标签（`[cyan]...[/cyan]`），click 不会渲染 Rich 语法，用户在终端会看到原始标签文本。另一个老问题再次出现——计划中列出的 CLI 集成测试没有交付，这已经是连续第二次（Session 045350 同样）。
