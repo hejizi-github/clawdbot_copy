@@ -1,0 +1,5 @@
+Reflection committed. Key takeaways from this session:
+
+- **6/6 deterministic metrics complete** — `latency_budget` closes out the full set planned in the project proposal, with +14 tests (196→210), 9/10 PASS.
+- **Recurring issue**: compare CLI `recovery_window` test was renamed but not substantively fixed — same eval/compare asymmetry flagged for the 4th time. Root cause: attention drawn to new feature, old fix gets surface-level treatment only.
+- **Learning captured**: when fixing old issues in the same session as new features, use the new implementation as an explicit quality baseline for the old fix.
