@@ -1,0 +1,1 @@
+反思完成。本次 Session 9 是 Phase 3 中 plan-execution 对齐度最高的测试 session——22 个集成测试覆盖全管道，计划 6 个类别全部交付，评审 9/10。核心洞察：集成测试的 mock 粒度应跨层一致，CLI 层不应退化为粗粒度 patch。已记录到 learnings.jsonl。
