@@ -163,6 +163,10 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
     "--latency-budget", type=float, default=None,
     help="Latency budget in milliseconds for speed scoring",
 )
+@click.option(
+    "--details", is_flag=True, default=False,
+    help="Show metric details in table output",
+)
 def compare(
     baseline_file: Path,
     current_file: Path,
@@ -173,6 +177,7 @@ def compare(
     threshold: float,
     recovery_window: int,
     latency_budget: float | None,
+    details: bool,
 ):
     """Compare two traces and detect metric regressions."""
     try:
@@ -207,7 +212,7 @@ def compare(
     elif fmt == "markdown":
         click.echo(format_markdown(result))
     else:
-        _print_comparison(result)
+        _print_comparison(result, show_details=details)
 
     sys.exit(1 if result.has_regression else 0)
 
@@ -357,7 +362,7 @@ def _print_calibration(result, threshold: float | None = None, passed: bool | No
         console.print(f"[yellow]⚠ {w}[/yellow]")
 
 
-def _print_comparison(result):
+def _print_comparison(result, show_details: bool = False):
     if result.has_regression:
         status = "[red bold]REGRESSION[/red bold]"
     else:
@@ -373,6 +378,9 @@ def _print_comparison(result):
     table.add_column("Current", justify="right")
     table.add_column("Delta", justify="right")
     table.add_column("Status", justify="center")
+    if show_details:
+        table.add_column("Baseline Details", style="dim")
+        table.add_column("Current Details", style="dim")
 
     for d in result.metric_deltas:
         sign = "+" if d.delta > 0 else ""
@@ -385,24 +393,31 @@ def _print_comparison(result):
         else:
             delta_style = "dim"
             status_str = "[dim]unchanged[/dim]"
-        table.add_row(
+        row = [
             d.name,
             f"{d.baseline_score:.2f}",
             f"{d.current_score:.2f}",
             f"[{delta_style}]{sign}{d.delta:.2f}[/{delta_style}]",
             status_str,
-        )
+        ]
+        if show_details:
+            row.append(_format_details_compact(d.baseline_details or {}))
+            row.append(_format_details_compact(d.current_details or {}))
+        table.add_row(*row)
 
     table.add_section()
     sign = "+" if result.overall_delta > 0 else ""
     overall_style = "red bold" if result.has_regression else "green bold"
-    table.add_row(
+    overall_row = [
         "[bold]Overall[/bold]",
         "",
         "",
         f"[{overall_style}]{sign}{result.overall_delta:.2f}[/{overall_style}]",
         "",
-    )
+    ]
+    if show_details:
+        overall_row.extend(["", ""])
+    table.add_row(*overall_row)
     console.print(table)
 
 

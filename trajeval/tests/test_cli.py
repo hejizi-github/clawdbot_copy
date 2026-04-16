@@ -356,6 +356,52 @@ class TestCompareCommand:
         )
         assert lb_delta is not None
 
+    def test_details_flag_shows_details_columns(self):
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", trace, trace, "--details",
+        ])
+        assert result.exit_code == 0
+        assert "Details" in result.output
+        col_count = result.output.count("Details")
+        assert col_count >= 2, f"Expected 2+ 'Details' (baseline + current), got {col_count}"
+
+    def test_no_details_flag_hides_columns(self):
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner()
+        result = runner.invoke(main, ["compare", trace, trace])
+        assert result.exit_code == 0
+        assert "Details" not in result.output
+
+    def test_details_flag_shows_metric_info(self):
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", trace, trace, "--details",
+        ])
+        assert result.exit_code == 0
+        assert "total_ste" in result.output or "failed=0" in result.output
+
+    def test_details_flag_with_json_format_ignored(self):
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", trace, trace, "--format", "json", "--details",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "metric_deltas" in data
+
+    def test_details_flag_with_markdown_format_ignored(self):
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", trace, trace, "--format", "markdown", "--details",
+        ])
+        assert result.exit_code == 0
+        assert "| Metric |" in result.output
+
 
 class TestAnnotateCommand:
     def test_saves_annotations(self, tmp_path):
