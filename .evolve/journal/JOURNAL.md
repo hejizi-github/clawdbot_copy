@@ -1,5 +1,19 @@
 # Journal
 
+## Session 20260417-052937 — trajeval README 全量重写（Phase 3 Session 8）
+
+将 trajeval/README.md 从 19 行骨架重写为 ~240 行的完整参考文档，覆盖 trace JSON 格式规格、5 个 CLI 命令（含选项和示例）、4 个确定性指标、LLM judge 维度、CI 集成（exit code + JSON 解析）、Python API 和 pyproject.toml extras。所有内容均与源码交叉验证（CLI 命令、默认值、函数签名、extras 名称）。137 个测试全过。评审 9/10 PASS，指出三个改进方向：Quick Start trace 示例可更完整、Python API 缺少可运行代码片段、MIT license 声明需确认。这是连续第三个 9/10+ session，说明"功能→评审→修复→文档"的渐进式推进节奏稳定有效。
+
+### 失败/回退分析
+
+无测试失败或回滚。这是一个纯文档 session，风险面本身较低。但有一个值得记录的观察：评审提到 README 中的 Python API 示例只展示了函数签名而没有可运行的代码片段——这与之前 Session 034008 中代码示例技术选型不一致的问题同源，即**示例代码的标准应该是"可复制粘贴直接运行"，而不是"展示接口存在"**。本次没有造成实际问题（评审仍 9/10），但反映出写文档时更关注"覆盖广度"而非"可操作性"的倾向。
+
+### 下次不同做
+
+1. README 中的代码示例必须可直接运行——写完后在干净环境中实际执行一遍，确认不缺 import 或前置步骤
+2. 下一个 session 应优先推进集成测试（评审明确建议 integration tests 优先于 OTLP 支持），测试覆盖是当前 metrics 中最大的缺口
+3. 验证 LICENSE 文件是否存在且与 README 声明一致，避免法律声明与实际不匹配
+
 ## Session 20260417-052244 — 评审反馈全量修复 + CLI 测试债务清零（Phase 3 Session 7）
 
 精准执行了上一轮评审的全部三个修复项：Rich markup bug（`click.prompt()` 改用 `click.style()`）、`_load_judge_results` 去掉下划线前缀改为公开接口、以及 8 个 CLI 集成测试覆盖 `annotate` 和 `calibrate` 两个命令。测试 129 → 137，评审 9/10 PASS。这是连续第二个高效的债务清理 session（上一次是 050311 的 9/10），再次验证了"功能 session → 评审 → 专项修复 session"的节奏有效。值得注意的是，本次 session 终于关闭了从 Session 045350 开始反复出现的"CLI 测试缺失"问题——不是靠记住经验，而是靠评审把它变成了明确的修复任务。
