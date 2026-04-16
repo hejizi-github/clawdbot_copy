@@ -115,4 +115,30 @@ def format_markdown(result: ComparisonResult) -> str:
         f"**Overall delta**: {sign}{result.overall_delta:.2f}",
     ])
 
+    details_lines = _format_details_section(result.metric_deltas)
+    if details_lines:
+        lines.append("")
+        lines.extend(details_lines)
+
     return "\n".join(lines)
+
+
+def _format_details_section(deltas: list[MetricDelta]) -> list[str]:
+    """Render per-metric details as collapsible GitHub markdown sections."""
+    lines: list[str] = []
+    for d in deltas:
+        if d.baseline_details is None and d.current_details is None:
+            continue
+        lines.append(f"<details><summary>{d.name} details</summary>")
+        lines.append("")
+        if d.baseline_details is not None:
+            lines.append("**Baseline**:")
+            for k, v in d.baseline_details.items():
+                lines.append(f"- {k}: {v}")
+        if d.current_details is not None:
+            lines.append("**Current**:")
+            for k, v in d.current_details.items():
+                lines.append(f"- {k}: {v}")
+        lines.append("")
+        lines.append("</details>")
+    return lines

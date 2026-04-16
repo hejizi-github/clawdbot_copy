@@ -280,3 +280,90 @@ class TestFormatMarkdown:
         )
         md = format_markdown(result)
         assert "10%" in md
+
+    def test_details_rendered_when_present(self):
+        result = ComparisonResult(
+            baseline_trace_id="b1",
+            current_trace_id="c1",
+            metric_deltas=[MetricDelta(
+                name="error_recovery", baseline_score=0.8, current_score=0.9,
+                delta=0.1, direction="improved", is_regression=False,
+                baseline_details={"total_errors": 3, "recovered": 2},
+                current_details={"total_errors": 3, "recovered": 3},
+            )],
+            overall_delta=0.1,
+            has_regression=False,
+        )
+        md = format_markdown(result)
+        assert "<details><summary>error_recovery details</summary>" in md
+        assert "**Baseline**:" in md
+        assert "- total_errors: 3" in md
+        assert "- recovered: 2" in md
+        assert "**Current**:" in md
+        assert "- recovered: 3" in md
+        assert "</details>" in md
+
+    def test_no_details_section_when_none(self):
+        result = ComparisonResult(
+            baseline_trace_id="b1",
+            current_trace_id="c1",
+            metric_deltas=[MetricDelta(
+                name="m1", baseline_score=0.8, current_score=0.9,
+                delta=0.1, direction="improved", is_regression=False,
+            )],
+            overall_delta=0.1,
+            has_regression=False,
+        )
+        md = format_markdown(result)
+        assert "<details>" not in md
+
+    def test_details_one_side_only(self):
+        result = ComparisonResult(
+            baseline_trace_id="b1",
+            current_trace_id="c1",
+            metric_deltas=[MetricDelta(
+                name="token_efficiency", baseline_score=0.7, current_score=0.0,
+                delta=-0.7, direction="regressed", is_regression=True,
+                baseline_details={"total_tokens": 500, "mode": "heuristic"},
+                current_details=None,
+            )],
+            overall_delta=-0.7,
+            has_regression=True,
+        )
+        md = format_markdown(result)
+        assert "<details><summary>token_efficiency details</summary>" in md
+        assert "**Baseline**:" in md
+        assert "- total_tokens: 500" in md
+        details_block = md.split("<details>")[1]
+        assert "**Current**:" not in details_block
+
+    def test_details_multiple_metrics(self):
+        result = ComparisonResult(
+            baseline_trace_id="b1",
+            current_trace_id="c1",
+            metric_deltas=[
+                MetricDelta(
+                    name="m1", baseline_score=0.8, current_score=0.9,
+                    delta=0.1, direction="improved", is_regression=False,
+                    baseline_details={"key": "val1"},
+                    current_details={"key": "val2"},
+                ),
+                MetricDelta(
+                    name="m2", baseline_score=0.5, current_score=0.5,
+                    delta=0.0, direction="unchanged", is_regression=False,
+                ),
+                MetricDelta(
+                    name="m3", baseline_score=0.9, current_score=0.7,
+                    delta=-0.2, direction="regressed", is_regression=True,
+                    baseline_details={"info": 42},
+                    current_details={"info": 10},
+                ),
+            ],
+            overall_delta=-0.03,
+            has_regression=True,
+        )
+        md = format_markdown(result)
+        assert md.count("<details>") == 2
+        assert "m1 details" in md
+        assert "m3 details" in md
+        assert "m2 details" not in md

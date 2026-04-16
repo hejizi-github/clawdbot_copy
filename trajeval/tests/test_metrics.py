@@ -536,7 +536,6 @@ class TestErrorRecovery:
         assert config.recovery_window == 3
 
 
-
 class TestLatencyBudgetIntegration:
     def test_evaluate_includes_latency_budget(self):
         trace = AgentTrace(
