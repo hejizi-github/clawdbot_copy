@@ -136,6 +136,7 @@ def _format_details_section(deltas: list[MetricDelta]) -> list[str]:
             for k, v in d.baseline_details.items():
                 lines.append(f"- {k}: {v}")
         if d.current_details is not None:
+            lines.append("")
             lines.append("**Current**:")
             for k, v in d.current_details.items():
                 lines.append(f"- {k}: {v}")

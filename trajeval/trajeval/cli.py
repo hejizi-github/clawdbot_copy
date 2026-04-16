@@ -44,6 +44,10 @@ def main():
     "--latency-budget", type=float, default=None,
     help="Latency budget in milliseconds for speed scoring",
 )
+@click.option(
+    "--details", is_flag=True, default=False,
+    help="Show metric details in table output",
+)
 def eval(
     trace_file: Path,
     fmt: str,
@@ -52,6 +56,7 @@ def eval(
     threshold: float,
     recovery_window: int,
     latency_budget: float | None,
+    details: bool,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
@@ -78,7 +83,7 @@ def eval(
         }
         click.echo(json.dumps(result, indent=2))
     else:
-        _print_report(trace, report)
+        _print_report(trace, report, show_details=details)
 
     sys.exit(0 if report.passed else 1)
 
@@ -433,7 +438,25 @@ def _print_judge_report(trace, result, threshold: float = 0.7, passed: bool = Tr
     console.print(scores)
 
 
-def _print_report(trace, report):
+def _format_details_compact(details: dict) -> str:
+    """Format a metric details dict as a compact one-line summary."""
+    if not details:
+        return ""
+    skip_keys = {"mode", "note"}
+    parts = []
+    for k, v in details.items():
+        if k in skip_keys:
+            continue
+        if isinstance(v, float):
+            parts.append(f"{k}={v:.1f}")
+        elif isinstance(v, list):
+            parts.append(f"{k}={len(v)}")
+        else:
+            parts.append(f"{k}={v}")
+    return ", ".join(parts)
+
+
+def _print_report(trace, report, show_details: bool = False):
     info = Table(title=f"Trace: {trace.trace_id[:24]}", show_header=False)
     info.add_column("Field", style="dim")
     info.add_column("Value")
@@ -452,22 +475,30 @@ def _print_report(trace, report):
     scores.add_column("Metric", style="cyan")
     scores.add_column("Score", justify="right")
     scores.add_column("Status", justify="center")
+    if show_details:
+        scores.add_column("Details", style="dim")
 
     for m in report.metrics:
         status = "[green]PASS[/green]" if m.passed else "[red]FAIL[/red]"
         score_style = "green" if m.passed else "red"
-        scores.add_row(m.name, f"[{score_style}]{m.score:.2f}[/{score_style}]", status)
+        row = [m.name, f"[{score_style}]{m.score:.2f}[/{score_style}]", status]
+        if show_details:
+            row.append(_format_details_compact(m.details))
+        scores.add_row(*row)
 
     scores.add_section()
     overall_style = "green bold" if report.passed else "red bold"
     pass_label = "[green bold]PASS[/green bold]"
     fail_label = "[red bold]FAIL[/red bold]"
     overall_status = pass_label if report.passed else fail_label
-    scores.add_row(
+    overall_row = [
         "[bold]Overall[/bold]",
         f"[{overall_style}]{report.overall_score:.2f}[/{overall_style}]",
         overall_status,
-    )
+    ]
+    if show_details:
+        overall_row.append("")
+    scores.add_row(*overall_row)
     console.print(scores)
 
 

@@ -303,6 +303,27 @@ class TestFormatMarkdown:
         assert "- recovered: 3" in md
         assert "</details>" in md
 
+    def test_details_baseline_current_separated_by_blank_line(self):
+        result = ComparisonResult(
+            baseline_trace_id="b1",
+            current_trace_id="c1",
+            metric_deltas=[MetricDelta(
+                name="m1", baseline_score=0.8, current_score=0.9,
+                delta=0.1, direction="improved", is_regression=False,
+                baseline_details={"a": 1},
+                current_details={"a": 2},
+            )],
+            overall_delta=0.1,
+            has_regression=False,
+        )
+        md = format_markdown(result)
+        lines = md.split("\n")
+        baseline_items = [i for i, l in enumerate(lines) if l.startswith("- a:")]
+        current_label = [i for i, l in enumerate(lines) if l == "**Current**:"]
+        assert len(baseline_items) >= 1
+        assert len(current_label) == 1
+        assert lines[current_label[0] - 1] == ""
+
     def test_no_details_section_when_none(self):
         result = ComparisonResult(
             baseline_trace_id="b1",

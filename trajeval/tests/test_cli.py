@@ -9,7 +9,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from trajeval.calibration import HumanAnnotation
-from trajeval.cli import main
+from trajeval.cli import _format_details_compact, main
 from trajeval.scorer import JudgeDimension, JudgeResult
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -128,6 +128,71 @@ class TestEvalCommand:
         lb = next(m for m in data["metrics"] if m["name"] == "latency_budget")
         assert lb["details"]["mode"] == "no_budget"
         assert lb["score"] == 1.0
+
+    def test_details_flag_shows_details_column(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3", "--details",
+        ])
+        assert result.exit_code == 0
+        assert "Details" in result.output
+
+    def test_no_details_flag_hides_column(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3",
+        ])
+        assert result.exit_code == 0
+        assert "Details" not in result.output
+
+    def test_details_flag_shows_metric_info(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3", "--details",
+        ])
+        assert result.exit_code == 0
+        assert "total_steps=" in result.output or "total_tool_calls=" in result.output
+
+    def test_details_flag_with_json_format_ignored(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.3", "--details",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "metrics" in data
+
+
+class TestFormatDetailsCompact:
+    def test_empty_dict(self):
+        assert _format_details_compact({}) == ""
+
+    def test_basic_ints(self):
+        result = _format_details_compact({"total_steps": 10, "productive_steps": 8})
+        assert "total_steps=10" in result
+        assert "productive_steps=8" in result
+
+    def test_float_formatting(self):
+        result = _format_details_compact({"total_duration_ms": 1234.5678})
+        assert "total_duration_ms=1234.6" in result
+
+    def test_list_shows_count(self):
+        result = _format_details_compact({"loops_found": [{"p": "a"}, {"p": "b"}]})
+        assert "loops_found=2" in result
+
+    def test_skips_mode_and_note(self):
+        result = _format_details_compact({"total_steps": 5, "mode": "heuristic", "note": "no errors"})
+        assert "mode" not in result
+        assert "note" not in result
+        assert "total_steps=5" in result
+
+    def test_comma_separated(self):
+        result = _format_details_compact({"a": 1, "b": 2})
+        assert ", " in result
 
 
 class TestJudgeCommand:
