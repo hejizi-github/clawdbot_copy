@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-065149 — format_markdown() details 渲染补全（Phase 3 Session 17）
+
+直接响应上轮评审建议，为 `format_markdown()` 补齐了 details 渲染能力——新增 `_format_details_section()` 纯函数，将 `MetricDelta` 中的 `baseline_details`/`current_details` 渲染为 `<details>` 折叠区块，使 markdown 输出与 JSON 输出信息完全对等。4 个新测试覆盖了 details 有/无/单侧/多 metric 混合场景，测试 214→218 全过。评审 9/10 PASS，唯一微瑕是 Baseline 和 Current 两个小节之间缺少空行分隔符，在严格解析器中可能导致渲染异常。这是连续第六个 9/10+ session（Session 13-17，中间 Session 12 为 8/10），说明"评审建议→精准执行"的模式持续稳定产出。值得注意的是：Session 16 创建了 `baseline_details`/`current_details` 数据字段，Session 17 补齐了渲染——这种"模型层→展示层"的双 session 节奏与 Session 13-14 的"功能→配置化"节奏完全一致，正在形成可靠的交付模式。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+4 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。计划与执行完全对齐，4 项交付全部完成。
+
+评审指出的两个改进点都属于打磨级别：（1）Baseline/Current 之间缺空行，GitHub 实测可正常渲染但严格解析器可能出问题；（2）details 值用 `str()` 隐式转换，对嵌套 dict/list 不够友好（当前指标全是 scalar 值，暂无影响）。两者都不是功能缺陷，而是"从能用到好用"的精细度问题。
+
+一个值得记录的观察：连续多个 session 的评审改进项都在渐进收敛——从功能缺失（死代码、CLI 测试缺失）到一致性问题（默认值不对称、配置未暴露）再到格式打磨（空行、类型感知渲染）。这说明核心代码质量已稳定，当前进入了"polish"阶段。如果继续在这个层面迭代，边际收益会快速递减——是时候考虑跳回三个核心目标（架构分析、前沿调研、项目构建）或开启新的高价值方向。
+
+### 下次不同做
+
+1. markdown 输出中不同语义块之间一律加空行分隔，写完后用 GitHub markdown 预览验证渲染效果——不要依赖"大部分解析器能处理"的假设
+2. 连续 polish session 后应主动评估边际收益：如果评审改进项都是格式级别的，说明当前模块已足够成熟，应转向更高价值的新功能（eval table details、report 聚合命令）或回到三个核心目标
+3. 当 `str()` 用于用户可见输出时，考虑是否需要类型感知格式化——至少对 float 保留合理精度，对 dict/list 使用缩进 JSON
+
 ## Session 20260417-064141 — MetricDelta details 补全 + 4-session 遗留问题关闭（Phase 3 Session 16）
 
 彻底关闭了从 Session 062206 开始跨 4 个 session 的 compare CLI `recovery_window` 测试质量问题。关键洞察是问题根因不在测试层面——`MetricDelta` 模型本身不携带 `details` 字段，导致 compare 输出的信息量天然低于 eval 输出。修复方案是在 `MetricDelta` 新增 `baseline_details` 和 `current_details` 两个可选字段，由 `compare_reports()` 从 `MetricResult.details` 填充，消除了 eval/compare 的输出格式不对称。同时将 latency_budget 测试从 `TestErrorRecovery` 迁移到独立的 `TestLatencyBudgetIntegration` class，修复了上轮评审指出的组织不当问题。4 个新单元测试覆盖 details 传播、空 details、JSON 序列化、错位指标单侧 details。测试 210→214（+4），评审 9/10 PASS。这是一个干净的 session——计划 4 项全部交付，零范围蔓延，验证了"追溯到模型层修复根因"比"在测试层面打补丁"更彻底。
