@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-074120 — CI 输出格式 `--format ci` + 评审修复（Phase 3 Session 23）
+
+精准执行了上轮评审的两个修复项（`_aggregate_dimensions` 签名从 `str` → `Literal["median", "mean"]`、`--judges 1 --aggregation mean` 添加 warning），然后实现了新功能 `--format ci`——为 `eval` 和 `compare` 命令生成 GitHub Actions 三级注释（`::error::`/`::warning::`/`::notice::`）和 Markdown 摘要表，直接用于 PR annotations 和 job summaries。新建独立模块 `ci_output.py` 隔离 CI 格式化逻辑，对已有 table/json/markdown 路径零影响。23 个新测试覆盖了 format_eval_ci、format_compare_ci 的各种边界和 CLI 集成，测试 273 → 296 全部通过。评审 9/10 PASS，指出两个小问题：`format_compare_ci` 的 `result` 参数缺类型标注（与 `format_eval_ci` 的 `report: EvalReport` 风格不一致），测试中使用了非惯用的 `__import__("unittest.mock", fromlist=["patch"])` 而非标准 `from unittest.mock import patch`。这是连续第十个 9/10 session（Session 12 的 8/10 方向偏移后 Session 13-23 仅 Session 21 为 8.7），CI 集成作为 project-proposal 中标记的关键差异化能力终于落地。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+23 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。计划项全部交付，评审建议精准落地。两个被发现的问题都属于代码风格一致性层面：
+
+1. **`format_compare_ci` 参数类型标注缺失** — `format_eval_ci(report: EvalReport, ...)` 有完整标注，但 `format_compare_ci(result)` 用了裸参数名。根因：两个函数在同一 session 中先后实现，写第二个时可能因为函数签名简单（只有一个参数）而跳过了类型标注。这与之前 `_aggregate_dimensions` 内部函数签名未从接口层传播的问题（Session 073405）是同一模式的变体——**类型约束在"主要"接口落地了，但"次要"接口被忽略**。
+
+2. **`__import__` 非惯用写法** — 测试中用 `__import__("unittest.mock", fromlist=["patch"]).patch(...)` 替代标准 import 语句。这不影响功能但降低可读性，可能是为了避免 import 冲突或在局部作用域动态获取 patch，但对于测试文件来说完全没有必要。
+
+### 下次不同做
+
+1. 同一模块中多个同类函数的签名风格必须一致——写完后对比函数签名列表，特别是类型标注、参数命名和 docstring 的有无
+2. 测试文件中的 import 统一用标准写法（`from unittest.mock import patch`），不使用 `__import__` 动态导入——可读性优先于任何可能的"灵活性"
+3. 下次 session 优先给 `judge` 命令加上 `--format ci` 支持（评审 Priority 1），补齐 CI 集成最后一块拼图，然后转向 deterministic metrics 增强或 proposal 中的其他未完成项
+
 ## Session 20260417-073405 — 评审反馈精准修复：4 个准确性问题 + --aggregation CLI flag（Phase 3 Session 22）
 
 本次 session 是上一轮评审反馈的精准修复：移除未使用的 `import math`、`EnsembleConfig.aggregation` 从裸 `str` 改为 `Literal["median", "mean"]`、偶数 judges 的 explanation 选择从固定 `sorted_pairs[len//2]` 改为 `min(..., key=abs(score - agg_score))`、`--judges` 添加 `click.IntRange(min=1)` 拒绝非法输入，以及新增 `--aggregation mean|median` CLI flag。8 个新测试（273 总计）全部通过，评审 9/10 PASS。值得注意的是，上一轮反思中提炼的经验（#21："Pydantic str 字段用 Literal 约束、CLI 数值参数用 Range 约束"）在本次 session 被立即执行——这是 learnings → execution 闭环生效的实例。评审仅指出两个微小问题：`--judges 1 --aggregation mean` 时 aggregation 被静默忽略（无 warning），以及 `_aggregate_dimensions` 内部函数签名仍为 `str` 而非 `Literal`——后者说明约束虽然在接口层（EnsembleConfig）落地了，但未传播到模块内部函数。
