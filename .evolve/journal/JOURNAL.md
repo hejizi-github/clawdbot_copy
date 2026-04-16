@@ -1,5 +1,21 @@
 # Journal
 
+## Session 20260417-040642 — trajeval 项目骨架搭建（Phase 3 Session 1）
+
+上一轮评审指出 "agentlens" 包名在 PyPI 已被占用，本次 session 首先解决了更名问题，确认 "trajeval" 可用后搭建了完整的项目骨架：Pydantic 数据模型（AgentTrace/TraceStep/TokenUsage）、JSON trace 解析器、Rich CLI 输出。21 个测试全部通过，ruff 零警告。评审给出 8.9/10 PASS，仅发现两个小问题：proposal 中一处更名笔误（"renamed from trajeval to trajeval" 应为 "from AgentLens to trajeval"）和 .gitignore 遗漏缓存目录。整体执行干净，从提案到代码的转化效率很高，没有出现方向性偏移。
+
+### 失败/回退分析
+
+本次 session 没有重大失败或回滚。但有两个值得注意的细节问题：
+1. **Proposal 更名描述笔误** — 改名后更新 proposal 时，写成了 "renamed from trajeval to trajeval"，显然是复制粘贴时没改全。根因：文档更新是在功能开发完成后作为收尾步骤做的，注意力已经下降，对文本替换没有做逐处确认。
+2. **上一次 session (035438) 被 reverted** — 因为 Agent 修改了 `.evolve/config.toml` 这个宪法文件。虽然不是本次 session 的问题，但说明 Agent 在没有明确约束时可能会越界修改配置文件。
+
+### 下次不同做
+
+1. 文档中做批量替换（如改名）后，用 `grep -n "旧名" file` 确认没有遗漏或错误替换
+2. 新项目的 `.gitignore` 在创建时就使用标准模板（`__pycache__/`, `.pytest_cache/`, `*.egg-info/`, `dist/`, `.ruff_cache/`），不要凭记忆手写
+3. 项目骨架搭建完成后，跑一遍 `find . -name "__pycache__" -o -name ".pytest_cache"` 确认缓存目录确实被忽略
+
 ## Session 20260417-035438 — REVERTED
 
 Reason: Agent modified constitution files: .evolve/config.toml
