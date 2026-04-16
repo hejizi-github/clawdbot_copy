@@ -3,24 +3,24 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 修复上次评审的 4 个准确性问题 + 新增 CLI flag，直接提升 trajeval 的可靠性和可用性
-- 完成度 (25%): 9/10 — 计划中 5 项全部完成并有测试覆盖；唯一小遗漏是 `--judges 1 --aggregation mean` 时 aggregation 被静默忽略，无警告
-- 准确性 (20%): 9/10 — `min(..., key=abs)` 选择最近解释的逻辑正确；Literal type 和 IntRange 的输入验证准确；`import math` 确认已无引用后移除
-- 一致性 (15%): 9/10 — 与 project-proposal.md 中 ensemble 评估方向完全一致，CLI 接口设计风格与既有命令统一
-- 副作用 (10%): 10/10 — 变更范围精准，273 个测试全部通过，无回归
+- 方向正确性 (30%): 9/10 — CI 输出格式直接实现了 project-proposal 中 "CI/CD Integration" 的核心功能，是 trajeval 区别于同类工具的关键差异点；两个 review fix 也属于上轮建议的正常跟进。
+- 完成度 (25%): 9/10 — eval 和 compare 的 `--format ci` 完整实现，含 GitHub Actions 三级注释 + Markdown 摘要表；review fix 两条均已落地；23 个新测试覆盖了单元和 CLI 集成两层。唯一小遗漏是 `judge` 命令未支持 `--format ci`（session log 自己也提到了"Could extend CI format to judge command"）。
+- 准确性 (20%): 9/10 — GitHub Actions annotation 语法 `::error title=...::message` 正确；borderline 阈值 0.85 合理；`_aggregate_dimensions` 的 `Literal["median", "mean"]` 类型签名与 click.Choice 定义一致。一个小瑕疵：`format_compare_ci` 参数 `result` 缺少类型标注（用了 bare `result`），而同模块 `format_eval_ci` 有完整标注，风格不一致。
+- 一致性 (15%): 9/10 — 与 project-proposal 的 roadmap（Phase 2: CI integration, regression gates）完全对齐；输出格式与已有的 table/json/markdown 格式体系平行扩展，无冲突。
+- 副作用 (10%): 10/10 — 变更干净隔离：新文件 `ci_output.py` 独立模块，CLI 仅增加 choice 选项和两个 elif 分支，对已有路径零影响。273 个既有测试全部通过。
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- 每个 fix 都有对应的测试，8 个新测试覆盖了边界情况（零值、负值、无效聚合方法、偶数 judges 的解释选择）
-- `Literal["median", "mean"]` 比 `str` 类型更安全，在 Pydantic 验证阶段就拒绝无效值，而不是在运行时静默失败
-- 偶数 judges 的解释选择从固定 `sorted_pairs[len//2]` 改为 `min(abs(score - agg_score))`，语义上更合理——选择分数最接近聚合值的 judge 的解释
-- `click.IntRange(min=1)` 在 CLI 层就拒绝非法输入，比在业务逻辑中校验更干净
+- CI 输出设计考虑周到：三级注释（error/warning/notice）区分 fail、borderline、solid pass，对 CI 消费者非常实用
+- 测试覆盖扎实：23 个新测试覆盖了 format_eval_ci、format_compare_ci 的各种边界（空 metrics、borderline 阈值、details 提取），以及 CLI 集成测试（exit code 验证）
+- 两个 review fix 精准：`Literal` 类型约束和 single-judge aggregation 警告都是上轮评审的原样落地
 
 **需要改进的地方**:
-- `--judges 1 --aggregation mean` 时 aggregation 参数被静默忽略（因为 `judges > 1` 才走 ensemble 路径）。建议：要么在 `judges == 1` 且 `aggregation != "median"` 时打印 warning，要么在 help text 中注明 aggregation 仅在 ensemble 模式下生效
-- `_aggregate_dimensions` 的类型签名仍然是 `aggregation: str`（scorer.py:252），而 `EnsembleConfig.aggregation` 已经是 `Literal["median", "mean"]`。建议保持一致，让内部函数也用 Literal 类型
+- `format_compare_ci(result)` 的 `result` 参数缺少类型标注（应为 `ComparisonResult`），与 `format_eval_ci(report: EvalReport, ...)` 风格不一致。建议补上 `from .compare import ComparisonResult` 并标注。
+- 测试中 `TestJudgeSingleAggregationWarning` 使用了 `__import__("unittest.mock", fromlist=["patch"]).patch(...)` 这种非惯用写法，常规做法是 `from unittest.mock import patch` 放在文件顶部。虽然功能正确，但可读性差。
 
 **下次 session 的建议**:
-- 项目已有 273 个测试且核心功能稳定，可以考虑进入新功能开发阶段，比如 project-proposal.md 中提到的 deterministic metrics 增强（loop detection n-gram 优化、token efficiency baseline 自动推断等）
-- 或者开始构建 CI 集成能力（`trajeval` 作为 CI step 输出 GitHub check annotation），这是 proposal 中提到的差异化方向
+- 优先级 1：给 `judge` 命令也加上 `--format ci` 支持，补齐 CI 集成的最后一块拼图
+- 优先级 2：修复 `format_compare_ci` 的类型标注和测试中的 import 风格
+- 优先级 3：开始考虑 deterministic metrics 的增强（loop detection n-gram 优化、token efficiency baseline auto-inference），这是 proposal Phase 1 的收尾工作
