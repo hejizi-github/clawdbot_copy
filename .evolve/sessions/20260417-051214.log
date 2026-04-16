@@ -1,0 +1,28 @@
+# Session 20260417-051214 — Calibration Module (Phase 3 Session 6)
+
+## What was done
+Implemented the calibration module — the "key differentiator" identified in the project proposal (Section 3.4). This adds the ability to collect human annotations, compare them against LLM-as-judge scores using Spearman rank correlation, and surface calibration quality per dimension.
+
+### Changes
+1. **Pre-fix**: Renamed `test_error_trace_has_lower_scores` → `test_error_trace_parseable` (reviewer feedback from last session)
+2. **New module**: `trajeval/calibration.py`
+   - `HumanAnnotation` model: trace_id, dimension, human_score (0-5), annotator, timestamp
+   - `AnnotationStore`: append-only JSONL storage with save/load/load_for_trace
+   - `compute_correlation()`: Spearman rank correlation between human annotations and LLM judge scores, per-dimension and overall, with warnings for small samples and constant scores
+3. **New CLI commands**:
+   - `trajeval annotate <trace.json>` — interactive: shows trace summary, prompts for dimension scores, saves to JSONL
+   - `trajeval calibrate <annotations.jsonl> <judgments.jsonl>` — computes and displays Spearman correlation table
+4. **Tests**: 19 new tests in `test_calibration.py`
+   - AnnotationStore: save/load roundtrip, batch, append, empty file, filter by trace, JSONL format
+   - Correlation: perfect correlation (ρ=1.0), weak correlation (ρ<0.5), per-dimension, no matching pairs, too-few-pairs warning, constant scores warning, multi-dimension, empty inputs
+   - Validation: score range enforcement (0-5), defaults
+
+### Metrics
+- Tests: 110 → 129 (+19)
+- ruff: clean
+- Execution time: 0.74s
+
+## What's next (Priority 2 continued)
+- Calibration design per reviewer: could add drift detection (score distribution shift between runs)
+- Remaining from proposal Session 5: OTLP trace format support, README
+- Uncovered CLI parameters from last review: `--dimensions`, `--expected-steps`, `--baseline-tokens`
