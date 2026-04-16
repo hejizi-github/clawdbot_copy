@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
+from trajeval.calibration import HumanAnnotation
 from trajeval.cli import main
 from trajeval.scorer import JudgeDimension, JudgeResult
 
@@ -196,3 +197,128 @@ class TestCompareCommand:
         data = json.loads(lenient.output)
         assert data["has_regression"] is False
         assert lenient.exit_code == 0
+
+
+class TestAnnotateCommand:
+    def test_saves_annotations(self, tmp_path):
+        out = tmp_path / "annotations.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(FIXTURES_DIR / "simple_trace.json"),
+            "--output", str(out),
+            "--dimensions", "task_completion,reasoning_quality",
+        ], input="4\n3\n")
+        assert result.exit_code == 0
+        assert "Saved 2 annotations" in result.output
+        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        assert len(lines) == 2
+        ann = json.loads(lines[0])
+        assert ann["dimension"] == "task_completion"
+        assert ann["human_score"] == 4
+
+    def test_rejects_invalid_score_then_accepts(self, tmp_path):
+        out = tmp_path / "annotations.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(FIXTURES_DIR / "simple_trace.json"),
+            "--output", str(out),
+            "--dimensions", "task_completion",
+        ], input="9\n3\n")
+        assert result.exit_code == 0
+        assert "Score must be 0-5" in result.output
+        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        assert len(lines) == 1
+        ann = json.loads(lines[0])
+        assert ann["human_score"] == 3
+
+    def test_custom_annotator(self, tmp_path):
+        out = tmp_path / "annotations.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(FIXTURES_DIR / "simple_trace.json"),
+            "--output", str(out),
+            "--dimensions", "task_completion",
+            "--annotator", "alice",
+        ], input="5\n")
+        assert result.exit_code == 0
+        ann = json.loads(out.read_text().strip())
+        assert ann["annotator"] == "alice"
+
+    def test_invalid_trace_exit_1(self, tmp_path):
+        bad = tmp_path / "bad.json"
+        bad.write_text("{invalid")
+        runner = CliRunner()
+        result = runner.invoke(main, ["annotate", str(bad)])
+        assert result.exit_code == 1
+
+
+class TestCalibrateCommand:
+    def _make_fixtures(self, tmp_path):
+        annotations_file = tmp_path / "annotations.jsonl"
+        judgments_file = tmp_path / "judgments.jsonl"
+
+        annotations = [
+            HumanAnnotation(trace_id="t1", dimension="task_completion", human_score=4),
+            HumanAnnotation(trace_id="t2", dimension="task_completion", human_score=2),
+            HumanAnnotation(trace_id="t3", dimension="task_completion", human_score=5),
+        ]
+        with open(annotations_file, "w") as f:
+            for a in annotations:
+                f.write(a.model_dump_json() + "\n")
+
+        judgments = [
+            JudgeResult(
+                trace_id="t1", overall_score=0.8, model="test",
+                dimensions=[JudgeDimension(name="task_completion", score=4, explanation="good")],
+            ),
+            JudgeResult(
+                trace_id="t2", overall_score=0.4, model="test",
+                dimensions=[JudgeDimension(name="task_completion", score=2, explanation="weak")],
+            ),
+            JudgeResult(
+                trace_id="t3", overall_score=1.0, model="test",
+                dimensions=[JudgeDimension(name="task_completion", score=5, explanation="great")],
+            ),
+        ]
+        with open(judgments_file, "w") as f:
+            for j in judgments:
+                f.write(j.model_dump_json() + "\n")
+
+        return annotations_file, judgments_file
+
+    def test_table_output(self, tmp_path):
+        ann, jdg = self._make_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, ["calibrate", str(ann), str(jdg)])
+        assert result.exit_code == 0
+        assert "Calibration" in result.output
+
+    def test_json_output(self, tmp_path):
+        ann, jdg = self._make_fixtures(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, ["calibrate", str(ann), str(jdg), "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "overall_spearman_rho" in data
+        assert "total_pairs" in data
+        assert data["total_pairs"] == 3
+
+    def test_empty_annotations_exit_1(self, tmp_path):
+        empty = tmp_path / "empty.jsonl"
+        empty.write_text("")
+        jdg = tmp_path / "j.jsonl"
+        jdg.write_text('{"trace_id":"t1","overall_score":0.5,"model":"m","dimensions":[]}\n')
+        runner = CliRunner()
+        result = runner.invoke(main, ["calibrate", str(empty), str(jdg)])
+        assert result.exit_code == 1
+        assert "No annotations" in result.output
+
+    def test_empty_judgments_exit_1(self, tmp_path):
+        ann = tmp_path / "a.jsonl"
+        ann.write_text('{"trace_id":"t1","dimension":"d","human_score":3,"annotator":"x","timestamp":"2026-01-01T00:00:00+00:00"}\n')
+        empty = tmp_path / "empty.jsonl"
+        empty.write_text("")
+        runner = CliRunner()
+        result = runner.invoke(main, ["calibrate", str(ann), str(empty)])
+        assert result.exit_code == 1
+        assert "No judge results" in result.output

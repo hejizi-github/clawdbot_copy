@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .calibration import AnnotationStore, HumanAnnotation, _load_judge_results, compute_correlation
+from .calibration import AnnotationStore, HumanAnnotation, load_judge_results, compute_correlation
 from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
@@ -220,7 +220,7 @@ def annotate(trace_file: Path, output: Path, dimensions: str, annotator: str):
     for dim in dim_list:
         while True:
             score_str = click.prompt(
-                f"Score for [cyan]{dim}[/cyan] (0-5)", type=str,
+                f"Score for {click.style(dim, fg='cyan')} (0-5)", type=str,
             )
             try:
                 score = int(score_str)
@@ -254,7 +254,7 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str):
         sys.exit(1)
 
     try:
-        judge_results = _load_judge_results(judgments_file)
+        judge_results = load_judge_results(judgments_file)
     except Exception as e:
         console.print(f"[red]Error loading judgments:[/red] {e}")
         sys.exit(1)

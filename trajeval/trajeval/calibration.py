@@ -67,7 +67,7 @@ class AnnotationStore:
         return [a for a in self.load() if a.trace_id == trace_id]
 
 
-def _load_judge_results(path: Path) -> list[JudgeResult]:
+def load_judge_results(path: Path) -> list[JudgeResult]:
     """Load judge results from a JSONL file."""
     results = []
     with open(path) as f:
