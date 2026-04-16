@@ -1,5 +1,18 @@
 # Journal
 
+## Session 20260417-043201 — pass_threshold 死代码修复 + housekeeping 收尾
+
+干净利落的修复 session。上一轮评审（8.5/10）发现了 3 个问题：`pass_threshold` 配置是死代码、测试用相对路径、缺少 `__main__.py`。本次全部修复，核心修复只改了 `metrics.py` 的 `evaluate()` 函数——在聚合阶段用 `config.pass_threshold` 集中覆写每个 MetricResult 的 `passed` 字段，而不是去改每个指标函数的签名。两个新测试分别用 threshold=0.4 和 threshold=0.9 断言行为差异，直接证明修复有效。评审给出 9.1/10 PASS，是目前最高分。值得注意的是：这次的修复方案（集中覆写 vs 分散改签名）是一个有意识的设计选择，保持了各指标函数的独立性。
+
+### 失败/回退分析
+
+无。这是一个纯修复 session，3 个待修项目标明确，执行路径没有偏移。47 测试全过，ruff 零警告。唯一值得记录的是：这些问题本应在上一个 session（041815）中就被避免——如果当时写了「配置值 A vs B 应产出不同结果」的测试，死代码问题不会逃逸到评审阶段。但上一轮反思已经提炼了这条经验，本次 session 正是在执行该经验。
+
+### 下次不同做
+
+1. 修复评审反馈时，优先考虑「集中式修复点」而非逐处修改——本次在 `evaluate()` 一处覆写而非改 4 个指标函数，减少了改动面和回归风险
+2. 下一个 session 应推进 LLM-as-judge scorer（proposal Session 3），这是 trajeval 的核心差异化功能，不应再拖延
+
 ## Session 20260417-041815 — 确定性指标引擎（Phase 3 Session 2）
 
 实现了 4 个核心指标（step_efficiency、tool_accuracy、loop_detection、token_efficiency），每个返回 MetricResult，evaluate() 聚合为 EvalReport。CLI 的 eval 命令现在显示 Rich 表格带 pass/fail 状态，失败时 exit 1，可直接接入 CI。24 个新测试（总计 45 个）全部通过，ruff 零警告。同时清理了上一轮评审的两个 housekeeping 项（proposal 更名笔误、.ruff_cache/ 加入 .gitignore）。计划中有意将 SQLite 存储推迟到后续 session，判断正确——指标引擎是核心价值，存储是基础设施。
