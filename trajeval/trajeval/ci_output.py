@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from .compare import ComparisonResult
 from .metrics import EvalReport, MetricResult
+from .scorer import EnsembleResult, JudgeResult
 
 
 def _annotation_level(metric: MetricResult) -> str:
@@ -64,7 +66,7 @@ def format_eval_ci(report: EvalReport, threshold: float = 0.7) -> str:
     return "\n".join(lines)
 
 
-def format_compare_ci(result) -> str:
+def format_compare_ci(result: ComparisonResult) -> str:
     lines: list[str] = []
 
     for d in result.metric_deltas:
@@ -107,5 +109,55 @@ def format_compare_ci(result) -> str:
     overall_status = "REGRESSION DETECTED" if result.has_regression else "OK"
     lines.append("")
     lines.append(f"**Overall delta: {sign}{result.overall_delta:.2f} — {overall_icon} {overall_status}**")
+
+    return "\n".join(lines)
+
+
+def _judge_annotation_level(score: int) -> str:
+    if score <= 2:
+        return "error"
+    if score == 3:
+        return "warning"
+    return "notice"
+
+
+def format_judge_ci(
+    result: JudgeResult | EnsembleResult,
+    threshold: float = 0.7,
+    passed: bool = True,
+) -> str:
+    lines: list[str] = []
+    is_ensemble = isinstance(result, EnsembleResult)
+
+    for d in result.dimensions:
+        level = _judge_annotation_level(d.score)
+        title = f"trajeval: {d.name} {d.score}/5"
+        lines.append(_annotation_line(level, title, d.explanation))
+
+    lines.append("")
+    if is_ensemble:
+        lines.append(f"## trajeval Judge Summary ({result.num_judges} judges, {result.aggregation})")
+    else:
+        lines.append("## trajeval Judge Summary")
+    lines.append("")
+
+    if is_ensemble:
+        stat_map = {s.name: s for s in result.dimension_stats}
+        lines.append("| Dimension | Score | Std Dev | Explanation |")
+        lines.append("|-----------|-------|---------|-------------|")
+        for d in result.dimensions:
+            stat = stat_map.get(d.name)
+            std_str = f"{stat.std_dev:.2f}" if stat else "-"
+            lines.append(f"| {d.name} | {d.score}/5 | {std_str} | {d.explanation} |")
+    else:
+        lines.append("| Dimension | Score | Explanation |")
+        lines.append("|-----------|-------|-------------|")
+        for d in result.dimensions:
+            lines.append(f"| {d.name} | {d.score}/5 | {d.explanation} |")
+
+    overall_icon = "✅" if passed else "❌"
+    overall_status = "PASS" if passed else "FAIL"
+    lines.append("")
+    lines.append(f"**Overall: {result.overall_score:.0%} — {overall_icon} {overall_status}** (threshold: {threshold:.0%})")
 
     return "\n".join(lines)

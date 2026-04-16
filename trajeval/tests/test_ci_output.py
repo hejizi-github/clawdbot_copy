@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from trajeval.ci_output import format_compare_ci, format_eval_ci
+from trajeval.ci_output import format_compare_ci, format_eval_ci, format_judge_ci
 from trajeval.cli import main
 from trajeval.compare import ComparisonResult, MetricDelta
 from trajeval.metrics import EvalReport, MetricResult
+from trajeval.scorer import (
+    DimensionStat,
+    EnsembleResult,
+    JudgeDimension,
+    JudgeResult,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -212,8 +219,7 @@ class TestCLICIFormat:
 class TestJudgeSingleAggregationWarning:
     def test_single_judge_non_default_aggregation_warns(self):
         runner = CliRunner()
-        with __import__("unittest.mock", fromlist=["patch"]).patch("trajeval.cli.judge") as mock_judge:
-            from trajeval.scorer import JudgeDimension, JudgeResult
+        with patch("trajeval.cli.judge") as mock_judge:
             mock_judge.return_value = JudgeResult(
                 trace_id="t1",
                 dimensions=[JudgeDimension(name="task_completion", score=4, explanation="ok")],
@@ -229,8 +235,7 @@ class TestJudgeSingleAggregationWarning:
 
     def test_single_judge_default_aggregation_no_warning(self):
         runner = CliRunner()
-        with __import__("unittest.mock", fromlist=["patch"]).patch("trajeval.cli.judge") as mock_judge:
-            from trajeval.scorer import JudgeDimension, JudgeResult
+        with patch("trajeval.cli.judge") as mock_judge:
             mock_judge.return_value = JudgeResult(
                 trace_id="t1",
                 dimensions=[JudgeDimension(name="task_completion", score=4, explanation="ok")],
@@ -243,3 +248,157 @@ class TestJudgeSingleAggregationWarning:
             ])
         assert "Warning" not in result.output
         assert "ignored" not in result.output
+
+
+class TestFormatJudgeCI:
+    def _make_result(self, dims: list[JudgeDimension], overall: float = 0.8) -> JudgeResult:
+        return JudgeResult(
+            trace_id="judge-trace-001",
+            dimensions=dims,
+            overall_score=overall,
+            model="claude-sonnet-4-6",
+        )
+
+    def test_high_score_produces_notice(self):
+        result = self._make_result([
+            JudgeDimension(name="task_completion", score=5, explanation="Perfect"),
+        ])
+        output = format_judge_ci(result)
+        assert "::notice title=trajeval: task_completion 5/5::Perfect" in output
+
+    def test_mid_score_produces_warning(self):
+        result = self._make_result([
+            JudgeDimension(name="reasoning_quality", score=3, explanation="Adequate"),
+        ])
+        output = format_judge_ci(result)
+        assert "::warning title=trajeval: reasoning_quality 3/5::Adequate" in output
+
+    def test_low_score_produces_error(self):
+        result = self._make_result([
+            JudgeDimension(name="tool_use_appropriateness", score=1, explanation="Poor"),
+        ])
+        output = format_judge_ci(result)
+        assert "::error title=trajeval: tool_use_appropriateness 1/5::Poor" in output
+
+    def test_zero_score_produces_error(self):
+        result = self._make_result([
+            JudgeDimension(name="harm_avoidance", score=0, explanation="Failed"),
+        ])
+        output = format_judge_ci(result)
+        assert "::error title=trajeval: harm_avoidance 0/5::Failed" in output
+
+    def test_score_4_produces_notice(self):
+        result = self._make_result([
+            JudgeDimension(name="task_completion", score=4, explanation="Good"),
+        ])
+        output = format_judge_ci(result)
+        assert "::notice title=trajeval: task_completion 4/5::Good" in output
+
+    def test_markdown_summary_table(self):
+        result = self._make_result([
+            JudgeDimension(name="task_completion", score=5, explanation="Great"),
+            JudgeDimension(name="reasoning_quality", score=3, explanation="OK"),
+        ])
+        output = format_judge_ci(result)
+        assert "## trajeval Judge Summary" in output
+        assert "| task_completion | 5/5 | Great |" in output
+        assert "| reasoning_quality | 3/5 | OK |" in output
+        assert "Std Dev" not in output
+
+    def test_pass_status(self):
+        result = self._make_result([
+            JudgeDimension(name="m1", score=4, explanation="ok"),
+        ], overall=0.8)
+        output = format_judge_ci(result, threshold=0.7, passed=True)
+        assert "✅ PASS**" in output
+        assert "threshold: 70%" in output
+
+    def test_fail_status(self):
+        result = self._make_result([
+            JudgeDimension(name="m1", score=2, explanation="bad"),
+        ], overall=0.4)
+        output = format_judge_ci(result, threshold=0.7, passed=False)
+        assert "❌ FAIL**" in output
+
+    def test_ensemble_includes_stats(self):
+        ensemble = EnsembleResult(
+            trace_id="ens-001",
+            dimensions=[
+                JudgeDimension(name="task_completion", score=4, explanation="Good"),
+            ],
+            overall_score=0.8,
+            model="claude-sonnet-4-6",
+            num_judges=3,
+            aggregation="median",
+            individual_results=[],
+            dimension_stats=[
+                DimensionStat(name="task_completion", median_score=4, mean_score=4.0, std_dev=0.58, scores=[3, 4, 5]),
+            ],
+        )
+        output = format_judge_ci(ensemble, threshold=0.7, passed=True)
+        assert "3 judges, median" in output
+        assert "| task_completion | 4/5 | 0.58 | Good |" in output
+        assert "Std Dev" in output
+
+    def test_empty_dimensions(self):
+        result = self._make_result([], overall=0.0)
+        output = format_judge_ci(result, passed=False)
+        assert "## trajeval Judge Summary" in output
+        assert "❌ FAIL**" in output
+
+
+class TestCLIJudgeCIFormat:
+    def test_judge_ci_format_pass(self):
+        runner = CliRunner()
+        with patch("trajeval.cli.judge") as mock_judge:
+            mock_judge.return_value = JudgeResult(
+                trace_id="t1",
+                dimensions=[
+                    JudgeDimension(name="task_completion", score=5, explanation="Excellent"),
+                    JudgeDimension(name="reasoning_quality", score=4, explanation="Good"),
+                ],
+                overall_score=0.9,
+                model="test-model",
+            )
+            result = runner.invoke(main, [
+                "judge", str(FIXTURES_DIR / "simple_trace.json"),
+                "--format", "ci", "--threshold", "0.7",
+            ])
+        assert result.exit_code == 0
+        assert "::notice" in result.output
+        assert "## trajeval Judge Summary" in result.output
+        assert "✅ PASS" in result.output
+
+    def test_judge_ci_format_fail(self):
+        runner = CliRunner()
+        with patch("trajeval.cli.judge") as mock_judge:
+            mock_judge.return_value = JudgeResult(
+                trace_id="t1",
+                dimensions=[
+                    JudgeDimension(name="task_completion", score=1, explanation="Bad"),
+                ],
+                overall_score=0.2,
+                model="test-model",
+            )
+            result = runner.invoke(main, [
+                "judge", str(FIXTURES_DIR / "simple_trace.json"),
+                "--format", "ci", "--threshold", "0.7",
+            ])
+        assert result.exit_code == 1
+        assert "::error" in result.output
+        assert "❌ FAIL" in result.output
+
+    def test_judge_ci_exit_code_matches_threshold(self):
+        runner = CliRunner()
+        with patch("trajeval.cli.judge") as mock_judge:
+            mock_judge.return_value = JudgeResult(
+                trace_id="t1",
+                dimensions=[JudgeDimension(name="task_completion", score=4, explanation="ok")],
+                overall_score=0.8,
+                model="test-model",
+            )
+            result = runner.invoke(main, [
+                "judge", str(FIXTURES_DIR / "simple_trace.json"),
+                "--format", "ci", "--threshold", "0.9",
+            ])
+        assert result.exit_code == 1

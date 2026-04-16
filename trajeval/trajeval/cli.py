@@ -15,7 +15,7 @@ from .calibration import AnnotationStore, HumanAnnotation, load_judge_results, c
 from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
-from .ci_output import format_compare_ci, format_eval_ci
+from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, ensemble_judge, judge
 
 console = Console()
@@ -94,7 +94,7 @@ def eval(
 @main.command(name="judge")
 @click.argument("trace_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--model", default="claude-sonnet-4-6", help="Model for LLM judge")
-@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+@click.option("--format", "fmt", type=click.Choice(["table", "json", "ci"]), default="table")
 @click.option(
     "--dimensions",
     default=",".join(ALL_DIMENSIONS),
@@ -160,6 +160,8 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
                 "individual_scores": [r.overall_score for r in result.individual_results],
             }
         click.echo(json.dumps(output, indent=2))
+    elif fmt == "ci":
+        click.echo(format_judge_ci(result, threshold=threshold, passed=passed))
     else:
         if isinstance(result, EnsembleResult):
             _print_ensemble_report(trace, result, threshold=threshold, passed=passed)
