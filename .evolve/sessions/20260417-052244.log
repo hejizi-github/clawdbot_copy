@@ -1,0 +1,13 @@
+Session complete. Here's the summary:
+
+**Session 20260417-052244 — Bug fix + CLI test debt payoff (Phase 3 Session 7)**
+
+Three changes, all from the reviewer's priority list:
+
+1. **Fixed Rich markup bug** (`cli.py:222`): Replaced `[cyan]{dim}[/cyan]` in `click.prompt()` with `click.style(dim, fg='cyan')`. Click doesn't render Rich markup — users were seeing raw `[cyan]...[/cyan]` tags.
+
+2. **Renamed `_load_judge_results` → `load_judge_results`**: It's imported by `cli.py`, so it's a public interface — the underscore prefix was misleading.
+
+3. **Added 8 CLI integration tests**: 4 for `annotate` (save, invalid score rejection, custom annotator, bad input) and 4 for `calibrate` (table output, JSON output, empty annotations, empty judgments). This pays off the CLI test debt from Sessions 051214 and 045350.
+
+Tests: 129 → 137, all passing. Next session should tackle OTLP trace format support or README documentation to make the project externally usable.
