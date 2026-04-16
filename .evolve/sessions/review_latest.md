@@ -3,26 +3,25 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — `error_recovery` 是 project-proposal.md 中明确规划的第 5 个确定性指标，直接推进项目目标
-- 完成度 (25%): 9/10 — 指标函数、evaluate() 集成、fixture、16 个新测试（单元+集成+CLI+compare）全部到位，计划中的每个点均已交付
-- 准确性 (20%): 8/10 — 核心逻辑正确（逐一验证了 fixture 和所有测试用例的数值推导），但 `recovery_window` 未接入 `MetricConfig`，与其他指标的配置模式不一致
-- 一致性 (15%): 9/10 — 代码风格、测试结构、命名规范与现有 4 个指标完全一致，与 project-proposal.md 的指标列表吻合
-- 副作用 (10%): 10/10 — 全部 192 个测试通过（0.78s），对已有测试仅修改 count 断言（4→5），无功能破坏
+- 方向正确性 (30%): 9/10 — 直接修复上次评审的首要问题（recovery_window 未进入 MetricConfig），推进第 5 个确定性指标的完整配置化，方向精准。
+- 完成度 (25%): 9/10 — 计划 7 项全部完成，额外补了 README 文档，196 测试全过。compare CLI 测试仅验证 flag 被接受（exit 0），未像 eval 测试那样验证 recovery_window 值实际流入评分结果，是唯一小遗漏。
+- 准确性 (20%): 10/10 — 代码逻辑正确：MetricConfig 默认值 3 与 CLI 默认值 3 一致；evaluate() 正确传递 config.recovery_window；docstring 关于连续错误独立评估的描述准确（已通过 test_consecutive_errors_with_small_window 验证）。
+- 一致性 (15%): 9/10 — 遵循 expected_steps/baseline_tokens 相同的「Config → evaluate() → CLI」布线模式，与 project-proposal.md 中列出的 6 个确定性指标一致。
+- 副作用 (10%): 10/10 — 纯增量变更，默认值 3 保持向后兼容，无破坏性改动。
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- 指标设计合理：recovery_window 滑动窗口是衡量"错误后恢复"的自然建模方式，比简单的 error_count 更有信息量
-- 测试覆盖全面：12 个单元测试覆盖了无错误、全恢复、部分恢复、零恢复、窗口内/外、末尾错误、自定义窗口等边界；5 个集成测试验证了 fixture→evaluate、CLI JSON 输出、compare 流程
-- recovery_trace.json fixture 设计精巧：一个"恢复成功"（parse_error → llm_call → tool_call）和两个"未恢复"（连续 upload_timeout 在 trace 末尾），既有叙事性又有测试价值
-- 对已有测试的修改极其克制，只改了必要的 count 断言
+- 变更聚焦且完整：从上次评审的反馈精确定位到 recovery_window 的 config 缺口，一次性贯穿 Model → Engine → CLI 三层
+- 测试覆盖扎实：4 个新测试分别覆盖 config flow-through（单元）、CLI eval flag（集成）、CLI compare flag（集成）、默认值检查（单元），192 → 196
+- 补充了 docstring 说明连续错误语义，降低未来维护者的认知负担
+- README 同步更新 eval 和 compare 两个命令的参数表，加了 error_recovery 指标行
 
 **需要改进的地方**:
-- `recovery_window` 参数未暴露到 `MetricConfig`。对比其他指标：`expected_steps`、`baseline_tokens`、`loop_ngram_sizes`、`loop_min_repeats` 都在 MetricConfig 中有对应字段，用户可通过 config 或未来 CLI flag 调控。当前 `evaluate()` 中硬编码为 `error_recovery(trace)`（默认 window=3），用户无法自定义。建议在 MetricConfig 中加 `recovery_window: int = 3`，并在 evaluate() 中传入。
-- `test_recovery_outside_window` 中变量名 `first_error_recovered` 实际存的是 `result.details["recovered"]`（总恢复数），名字有误导性。建议改为 `recovered_count`。
-- 连续错误的"恢复"语义可以更明确地文档化：当前实现中 `error→error→error→success`（window=3）会将 3 个 error 都标记为 recovered，因为每个 error 的窗口内都能看到那个 success。这是合理的设计（"最终恢复了"），但也可以有另一种解读（"只有最后一个 error 真正触发了恢复"）。建议在 docstring 中加一句说明这个语义选择。
+- `test_recovery_window_flag_accepted`（test_cli.py:220-229）只断言 exit_code==0 和输出包含 metric_deltas，没有验证 recovery_window=2 实际影响了评分。建议补一个断言检查输出中 error_recovery 的 details.recovery_window == 2，与 eval 的测试保持同等严谨度。
+- session log 第 2 行有格式瑕疵：`*CLI eval**` 应为 `**CLI eval**`（缺少前导星号）。不影响功能但作为自动化记录建议修正模板。
 
 **下次 session 的建议**:
-- 优先补上 `MetricConfig.recovery_window` 的集成，保持所有指标的配置模式一致——这是一个小改动但对架构一致性很重要
-- 考虑添加 project-proposal.md 中列出的下一个指标 `latency_budget`（`duration / latency_budget`），继续推进指标覆盖
-- 或者转向深化现有功能：给 CLI 的 `eval` 命令加 `--recovery-window` flag，让用户可以从命令行调控恢复窗口大小
+- 按 session log 中的提示，添加 `latency_budget`（第 6 个确定性指标），补齐 project-proposal.md 中规划的全部确定性指标
+- 加强 compare CLI 的 recovery_window 测试（上述改进点），使 eval 和 compare 的测试覆盖对等
+- 考虑为 MetricConfig 的所有可配置字段（loop_ngram_sizes、loop_min_repeats）也统一加 CLI flags，实现完整的 config 化（当前只有 expected_steps、baseline_tokens、recovery_window、threshold 暴露到 CLI）

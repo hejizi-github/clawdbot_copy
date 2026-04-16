@@ -1,0 +1,3 @@
+评审完成。**Verdict: PASS, 9/10**。
+
+变更精准修复了上次评审的首要问题（`recovery_window` 未进入 MetricConfig），贯穿 Model → Engine → CLI 三层，196 测试全过，代码逻辑正确，无破坏性改动。唯一小遗漏是 compare CLI 的测试不如 eval CLI 的严谨（只验证 flag 被接受，没验证值流入评分）。建议下次 session 添加第 6 个确定性指标 `latency_budget`。

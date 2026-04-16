@@ -1,0 +1,1 @@
+Reflection committed. Session 14 的日志已写入 JOURNAL.md：记录了 recovery_window 配置化收尾的完整执行（9/10 PASS, +4 tests），核心失败分析指出 compare CLI 测试严谨度弱于 eval CLI 的不对等问题，下次应在 CLI 测试中断言参数值实际生效而非仅验证 exit code。无新经验沉淀（已有 learnings 覆盖了此类模式）。
