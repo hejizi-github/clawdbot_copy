@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from pydantic import BaseModel, Field
 
@@ -51,7 +52,9 @@ DIMENSION_PROMPTS = {
 
 class JudgeConfig(BaseModel):
     model: str = "claude-sonnet-4-6"
-    dimensions: list[str] = Field(default=["task_completion", "reasoning_quality"])
+    dimensions: list[str] = Field(
+        default_factory=lambda: ["task_completion", "reasoning_quality"],
+    )
     temperature: float = 0.0
     max_tokens: int = 1024
 
@@ -117,10 +120,8 @@ def _normalize_score(dimensions: list[JudgeDimension]) -> float:
 def _parse_response(text: str, trace_id: str) -> list[JudgeDimension]:
     """Parse the LLM JSON response into JudgeDimension objects."""
     text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [ln for ln in lines if not ln.startswith("```")]
-        text = "\n".join(lines)
+    text = re.sub(r"^```\w*\n", "", text)
+    text = re.sub(r"\n```\s*$", "", text)
 
     data = json.loads(text)
     dims = data.get("dimensions", [])

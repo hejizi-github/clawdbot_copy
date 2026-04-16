@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
 from .scorer import JudgeConfig, judge
@@ -78,7 +79,10 @@ def eval(
     default="task_completion,reasoning_quality",
     help="Comma-separated dimensions to evaluate",
 )
-def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str):
+@click.option(
+    "--threshold", type=float, default=0.6, help="Pass/fail threshold (0.0-1.0, default 0.6)"
+)
+def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold: float):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
         trace = ingest_json(trace_file)
@@ -96,19 +100,138 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str):
         console.print(f"[red]Judge error:[/red] {result.error}")
         sys.exit(1)
 
+    passed = result.overall_score >= threshold
+
     if fmt == "json":
         output = {
             "trace_id": result.trace_id,
             "overall_score": result.overall_score,
+            "passed": passed,
+            "threshold": threshold,
             "model": result.model,
             "dimensions": [d.model_dump() for d in result.dimensions],
         }
         click.echo(json.dumps(output, indent=2))
     else:
-        _print_judge_report(trace, result)
+        _print_judge_report(trace, result, threshold=threshold, passed=passed)
+
+    sys.exit(0 if passed else 1)
 
 
-def _print_judge_report(trace, result):
+@main.command()
+@click.argument("baseline_file", type=click.Path(exists=True, path_type=Path))
+@click.argument("current_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--format", "fmt", type=click.Choice(["table", "json", "markdown"]), default="table"
+)
+@click.option(
+    "--tolerance",
+    type=float,
+    default=0.05,
+    help="Regression tolerance (0.0-1.0, default 0.05). Score drops beyond this are flagged.",
+)
+@click.option("--expected-steps", type=int, default=None, help="Baseline step count for efficiency")
+@click.option(
+    "--baseline-tokens", type=int, default=None, help="Baseline token count for efficiency"
+)
+@click.option(
+    "--threshold", type=float, default=0.7, help="Metric pass/fail threshold (0.0-1.0, default 0.7)"
+)
+def compare(
+    baseline_file: Path,
+    current_file: Path,
+    fmt: str,
+    tolerance: float,
+    expected_steps: int | None,
+    baseline_tokens: int | None,
+    threshold: float,
+):
+    """Compare two traces and detect metric regressions."""
+    try:
+        baseline_trace = ingest_json(baseline_file)
+        current_trace = ingest_json(current_file)
+    except IngestError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+    config = MetricConfig(
+        expected_steps=expected_steps,
+        baseline_tokens=baseline_tokens,
+        pass_threshold=threshold,
+    )
+    baseline_report = evaluate(baseline_trace, config)
+    current_report = evaluate(current_trace, config)
+
+    result = compare_reports(baseline_report, current_report, tolerance=tolerance)
+
+    if fmt == "json":
+        output = {
+            "baseline_trace_id": result.baseline_trace_id,
+            "current_trace_id": result.current_trace_id,
+            "overall_delta": result.overall_delta,
+            "has_regression": result.has_regression,
+            "tolerance": result.tolerance,
+            "metric_deltas": [d.model_dump() for d in result.metric_deltas],
+        }
+        click.echo(json.dumps(output, indent=2))
+    elif fmt == "markdown":
+        click.echo(format_markdown(result))
+    else:
+        _print_comparison(result)
+
+    sys.exit(1 if result.has_regression else 0)
+
+
+def _print_comparison(result):
+    if result.has_regression:
+        status = "[red bold]REGRESSION[/red bold]"
+    else:
+        status = "[green bold]OK[/green bold]"
+    b_id = result.baseline_trace_id[:16]
+    c_id = result.current_trace_id[:16]
+    console.print(f"\nCompare: {b_id} vs {c_id}  {status}")
+    console.print(f"Tolerance: {result.tolerance:.0%}\n")
+
+    table = Table(title="Metric Comparison")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Baseline", justify="right")
+    table.add_column("Current", justify="right")
+    table.add_column("Delta", justify="right")
+    table.add_column("Status", justify="center")
+
+    for d in result.metric_deltas:
+        sign = "+" if d.delta > 0 else ""
+        if d.direction == "regressed":
+            delta_style = "red"
+            status_str = "[red]REGRESSED[/red]"
+        elif d.direction == "improved":
+            delta_style = "green"
+            status_str = "[green]IMPROVED[/green]"
+        else:
+            delta_style = "dim"
+            status_str = "[dim]unchanged[/dim]"
+        table.add_row(
+            d.name,
+            f"{d.baseline_score:.2f}",
+            f"{d.current_score:.2f}",
+            f"[{delta_style}]{sign}{d.delta:.2f}[/{delta_style}]",
+            status_str,
+        )
+
+    table.add_section()
+    sign = "+" if result.overall_delta > 0 else ""
+    overall_style = "red bold" if result.has_regression else "green bold"
+    table.add_row(
+        "[bold]Overall[/bold]",
+        "",
+        "",
+        f"[{overall_style}]{sign}{result.overall_delta:.2f}[/{overall_style}]",
+        "",
+    )
+    console.print(table)
+
+
+def _print_judge_report(trace, result, threshold: float = 0.6, passed: bool = True):
     info = Table(title=f"Judge: {trace.trace_id[:24]}", show_header=False)
     info.add_column("Field", style="dim")
     info.add_column("Value")
@@ -130,13 +253,13 @@ def _print_judge_report(trace, result):
 
     scores.add_section()
     overall_pct = f"{result.overall_score:.0%}"
-    if result.overall_score >= 0.8:
-        overall_color = "green bold"
-    elif result.overall_score >= 0.6:
-        overall_color = "yellow bold"
-    else:
-        overall_color = "red bold"
-    scores.add_row("[bold]Overall[/bold]", f"[{overall_color}]{overall_pct}[/{overall_color}]", "")
+    pass_label = "[green bold]PASS[/green bold]" if passed else "[red bold]FAIL[/red bold]"
+    overall_color = "green bold" if passed else "red bold"
+    scores.add_row(
+        "[bold]Overall[/bold]",
+        f"[{overall_color}]{overall_pct}[/{overall_color}]",
+        f"{pass_label} (threshold: {threshold:.0%})",
+    )
     console.print(scores)
 
 
