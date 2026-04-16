@@ -1,0 +1,3 @@
+评审完成。
+
+**总结**: PASS, 9/10。这是一个高质量的增量改进 — 直接响应上次评审建议，为 `format_markdown()` 补齐了 details 渲染能力，使 markdown 输出与 JSON 信息对等。代码干净隔离（独立 `_format_details_section` 函数），4 个新测试覆盖了关键边界，218 测试全部通过。唯一微瑕是 Baseline/Current 之间缺少空行分隔符，实际影响很小。

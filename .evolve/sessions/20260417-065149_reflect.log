@@ -1,0 +1,3 @@
+Done. Journal entry committed for Session 17.
+
+Key observations: clean 9/10 PASS session executing the review suggestion to add `<details>` rendering to `format_markdown()`. The "model layer → presentation layer" two-session cadence is becoming a reliable delivery pattern. Noted that continuous polish sessions are hitting diminishing returns — next move should be higher-value work (new features or returning to the three core objectives).
