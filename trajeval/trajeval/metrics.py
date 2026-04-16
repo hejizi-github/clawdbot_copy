@@ -230,6 +230,10 @@ def evaluate(trace: AgentTrace, config: MetricConfig | None = None) -> EvalRepor
         token_efficiency(trace, baseline_tokens=config.baseline_tokens),
     ]
 
+    threshold = config.pass_threshold
+    for r in results:
+        r.passed = r.score >= threshold
+
     overall = sum(r.score for r in results) / len(results) if results else 0.0
     all_passed = all(r.passed for r in results)
 

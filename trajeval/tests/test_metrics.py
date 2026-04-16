@@ -144,8 +144,8 @@ class TestLoopDetection:
         assert result.score < 1.0
         assert len(result.details["loops_found"]) > 0
 
-    def test_loop_trace_fixture(self):
-        trace = ingest_json("tests/fixtures/loop_trace.json")
+    def test_loop_trace_fixture(self, loop_trace_path):
+        trace = ingest_json(loop_trace_path)
         result = loop_detection(trace)
         assert result.score < 1.0
         patterns = [entry["pattern"] for entry in result.details["loops_found"]]
@@ -244,3 +244,47 @@ class TestEvaluate:
         report = evaluate(trace)
         assert report.passed is True
         assert report.overall_score == 1.0
+
+    def test_threshold_low_passes(self):
+        """A score of 0.5 passes with threshold=0.4 but fails with default 0.7."""
+        trace = AgentTrace(
+            trace_id="th1",
+            steps=[
+                TraceStep(type="llm_call", name="m1"),
+                TraceStep(type="error", name="fail"),
+            ],
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        default_report = evaluate(trace)
+        step_m = next(m for m in default_report.metrics if m.name == "step_efficiency")
+        assert step_m.score == 0.5
+        assert step_m.passed is False
+
+        low_config = MetricConfig(pass_threshold=0.4)
+        low_report = evaluate(trace, low_config)
+        step_m_low = next(m for m in low_report.metrics if m.name == "step_efficiency")
+        assert step_m_low.score == 0.5
+        assert step_m_low.passed is True
+
+    def test_threshold_high_fails(self):
+        """A score of 0.75 passes with default 0.7 but fails with threshold=0.9."""
+        trace = AgentTrace(
+            trace_id="th2",
+            steps=[
+                TraceStep(type="llm_call", name="m1"),
+                TraceStep(type="tool_call", name="t1"),
+                TraceStep(type="tool_call", name="t2"),
+                TraceStep(type="error", name="fail"),
+            ],
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        default_report = evaluate(trace)
+        step_m = next(m for m in default_report.metrics if m.name == "step_efficiency")
+        assert step_m.score == 0.75
+        assert step_m.passed is True
+
+        high_config = MetricConfig(pass_threshold=0.9)
+        high_report = evaluate(trace, high_config)
+        step_m_high = next(m for m in high_report.metrics if m.name == "step_efficiency")
+        assert step_m_high.score == 0.75
+        assert step_m_high.passed is False

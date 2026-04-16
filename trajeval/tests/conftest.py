@@ -23,6 +23,11 @@ def error_trace_path():
 
 
 @pytest.fixture
+def loop_trace_path():
+    return FIXTURES_DIR / "loop_trace.json"
+
+
+@pytest.fixture
 def simple_trace_dict():
     return {
         "trace_id": "dict-trace-001",

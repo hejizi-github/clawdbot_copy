@@ -1,0 +1,8 @@
+**Session 2 complete.** Delivered the deterministic metrics engine:
+
+- **4 metrics**: `step_efficiency`, `tool_accuracy`, `loop_detection`, `token_efficiency` — each with baseline and heuristic modes
+- **CLI integration**: `trajeval eval` now shows metric scores with pass/fail, exits 1 on failure (CI-ready)
+- **24 new tests** (45 total), ruff clean
+- **Housekeeping**: fixed proposal rename typo, added `.ruff_cache/` to `.gitignore`
+
+**Next session**: Session 3 per proposal — LLM-as-judge scorer with Anthropic SDK integration and structured rubric prompts.

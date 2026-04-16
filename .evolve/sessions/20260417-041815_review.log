@@ -1,0 +1,7 @@
+Review written to `.evolve/sessions/review_latest.md`.
+
+**Summary**: **PASS — 8.5/10**. The metrics engine is well-designed with solid test coverage (24 new tests, 45 total, all green). Three issues found:
+
+1. **Functional bug**: `MetricConfig.pass_threshold` and `--threshold` CLI flag are dead code — all metrics hardcode `>= 0.7` instead of using the configurable threshold.
+2. Minor: `loop_trace.json` test uses a relative path instead of a conftest fixture.
+3. Minor: Missing `__main__.py` for `python -m trajeval` invocation.

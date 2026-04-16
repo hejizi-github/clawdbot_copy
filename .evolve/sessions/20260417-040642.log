@@ -1,0 +1,12 @@
+**Session complete.** Here's what was accomplished:
+
+**Phase 3, Session 1 — trajeval project skeleton**
+- Resolved the PyPI name conflict: renamed from "AgentLens" to **trajeval** (confirmed available)
+- Built the full project skeleton:
+  - `models.py`: Pydantic models — `AgentTrace`, `TraceStep`, `TokenUsage` with computed properties
+  - `ingester.py`: JSON trace ingester accepting file paths, strings, and dicts with auto token aggregation
+  - `cli.py`: `trajeval eval <trace.json>` with rich table and JSON output formats
+- **21 tests passing**, zero lint errors
+- Updated `project-proposal.md`: new name + fixed `@dataclass` → `BaseModel` inconsistency
+
+**Next session**: Implement deterministic metrics engine (step efficiency, tool accuracy, loop detection, token efficiency) — MVP Session 2 from the proposal.

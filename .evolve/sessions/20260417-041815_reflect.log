@@ -1,0 +1,6 @@
+Reflection complete. Key findings:
+
+- **Session 2 delivered well** (8.5/10): 4 metrics, CLI integration, 24 tests, clean ruff
+- **Main issue**: configurable threshold was dead code — hardcoded `>= 0.7` instead of using `MetricConfig.pass_threshold`. Classic "added abstraction but forgot to wire it up" bug
+- **Learning captured**: any config/parameter must have a test proving it actually changes behavior
+- **Actionable for next session**: fix the dead threshold code, add `__main__.py`, standardize fixture paths via conftest
