@@ -1,0 +1,53 @@
+# Session 20260417-071417 — Expand LLM-as-Judge to 5 Dimensions + Bias Mitigation (Phase 3 Session 20)
+
+## What Was Done
+
+Expanded the LLM-as-judge scorer module from 2 to 5 evaluation dimensions and added position bias mitigation via randomized dimension ordering. This is the first session to shift from deterministic metrics (feature-complete after 8 consecutive 9/10 sessions) to the LLM-as-judge module.
+
+### Changes
+
+1. **`trajeval/trajeval/scorer.py`**:
+   - Added 3 new dimension prompts: `tool_use_appropriateness`, `information_synthesis`, `harm_avoidance`
+   - Added `ALL_DIMENSIONS` constant for programmatic access
+   - Added `randomize_order: bool = True` to `JudgeConfig`
+   - Updated `build_user_prompt()` to shuffle dimension order when `randomize_order=True`
+   - Updated default dimensions from 2 → 5
+
+2. **`trajeval/trajeval/cli.py`**:
+   - Updated `judge` command `--dimensions` default from 2 hardcoded to `ALL_DIMENSIONS`
+   - Imported `ALL_DIMENSIONS` to keep CLI in sync with scorer module
+
+3. **`trajeval/tests/test_scorer.py`**:
+   - Added `mock_5dim_response` fixture
+   - Updated `test_default_dimensions` to verify all 5 dimensions
+   - Added `test_all_5_dimensions_scoring` — verifies correct score calculation with 5 dims
+   - Added `test_subset_dimensions` — verifies custom dimension selection still works
+   - Added `TestDimensionPrompts` class (5 tests): each dimension's prompt text, all 5 in single prompt
+   - Added `TestRandomization` class (5 tests): order preservation, randomization produces variety, no input mutation, config default, passthrough to judge
+
+### Metrics
+- Tests: 234 → 246 (+12), all passing
+- New test classes: 2 (TestDimensionPrompts, TestRandomization)
+- Files changed: 3 (scorer.py, cli.py, test_scorer.py)
+
+## Plan Checklist
+- [x] Add 3 dimension prompts (tool_use_appropriateness, information_synthesis, harm_avoidance)
+- [x] Add `randomize_order` to JudgeConfig
+- [x] Shuffle dimensions in build_user_prompt when randomize_order=True
+- [x] Update JudgeConfig default to all 5 dimensions
+- [x] Update CLI --dimensions default to match
+- [x] Test all 5 dimension prompts appear in user prompt
+- [x] Test randomized ordering produces different orderings
+- [x] Test randomize_order=False preserves original order
+- [x] Test judge works with all 5 dimensions
+- [x] Test custom dimension subset selection still works
+
+## Why This Direction
+
+The deterministic metrics module reached feature-complete status (sessions 12-19, all 9/10). Reviewer and self-reflection both pointed to LLM-as-judge as the next high-value direction. The proposal specifies 5 dimensions but only 2 were implemented — this was the clearest gap.
+
+## Next Steps
+
+- Multi-judge ensemble (2-3 judges, majority vote) — proposal section 3.3
+- CLI `--no-randomize` flag for reproducible evaluation
+- End-to-end test with real trace demonstrating all 5 dimensions
