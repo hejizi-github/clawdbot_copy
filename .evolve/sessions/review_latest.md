@@ -3,25 +3,29 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 精准修复上次评审指出的功能性 bug 和两个 housekeeping 项，属于高优先级的技术债清理，为后续 Session 3（LLM-as-judge）扫清障碍。
-- 完成度 (25%): 9/10 — 计划的三项全部完成：pass_threshold bug 修复、loop_trace_path fixture、__main__.py。47 测试全过，ruff 零警告，python -m trajeval 验证通过。
-- 准确性 (20%): 9/10 — 修复方案正确且简洁：在 `evaluate()` 中用 3 行代码统一覆写 `passed` 字段（metrics.py:233-235），避免了给每个指标函数增加 threshold 参数的侵入性改法。新增的两个测试（threshold=0.4 和 threshold=0.9）直接证明了 threshold 参数的有效性。有一个小瑕疵：`__main__.py` 省略了 `if __name__ == "__main__":` guard——对 `__main__.py` 来说技术上不需要，但加上是更标准的写法。
-- 一致性 (15%): 9/10 — 完全响应了上次评审（Session 2 review）的三条建议，与 project-proposal.md 的迭代节奏一致。
-- 副作用 (10%): 10/10 — 改动干净隔离，没有触碰已有逻辑。各指标函数内部保留的 `>= 0.7` 默认判定不影响功能（被 evaluate 覆写），且使函数独立调用时仍有合理默认值。
+- 方向正确性 (30%): 9/10 — 精确对应 proposal Session 3 计划，LLM-as-judge 是 trajeval 相对纯规则工具的核心差异化能力，直接推进项目最关键价值主张
+- 完成度 (25%): 9/10 — 计划中四项交付物全部完成（结构化 rubric prompt、SDK 集成含 prompt caching、JSON 输出、mock 测试），23 个新测试覆盖 prompt 构建/解析/归一化/judge 函数/错误处理/缺包场景
+- 准确性 (20%): 8/10 — 代码逻辑正确，70 测试全绿，ruff 零警告；code fence 剥离逻辑略脆弱（按行首 ``` 过滤，若 JSON 内容恰好有此前缀会误删），实际风险极低
+- 一致性 (15%): 9/10 — 与 project-proposal.md 架构图、数据模型、依赖选型完全吻合；CLI 模式与已有 `eval` 命令保持一致；pyproject.toml 的 `[judge]` optional dep 已就绪
+- 副作用 (10%): 9/10 — 变更干净隔离：2 个新文件 + cli.py 仅增加 1 行 import 和 1 个 subcommand；47 个既有测试无回归
 
-**加权总分**: 9.1/10
+**加权总分**: 9/10
 
 **做得好的地方**:
-- 修复方案的选择非常精准：在 `evaluate()` 中集中覆写 `passed` 字段，而不是修改 4 个指标函数的签名。这保持了单一职责——指标函数只算分，evaluate 负责判定。
-- 新增测试设计合理：构造了已知分数的 trace（0.5 和 0.75），分别用不同 threshold 验证 pass/fail 翻转，而不是 mock 或间接测试。这是直接证明 bug 修复有效的最佳方式。
-- conftest fixture 风格与已有 fixtures（simple_trace_path, minimal_trace_path, error_trace_path）完全一致。
-- 从发现问题（Session 2 review）到修复（Session 3），闭环干净利落，说明 review-reflect-fix 的迭代循环运作良好。
+- **依赖注入设计** — `judge(trace, config, client=None)` 让测试可以完全 mock，同时允许用户传入自定义 client（自定义 base_url/timeout），这是成熟的 SDK 集成模式
+- **Prompt caching** — system prompt 使用 `cache_control: {"type": "ephemeral"}`，批量评估同类 trace 时可复用 rubric 缓存，符合 Anthropic 最佳实践
+- **优雅降级** — `anthropic` 未安装时返回带 error 的 JudgeResult 而非崩溃，配合 `pip install trajeval[judge]` 的可选依赖设计，对用户友好
+- **测试质量** — 23 个测试组织清晰（6 prompt + 5 parse + 5 normalize + 7 judge），覆盖了 score clamping、code fence 剥离、API 失败、包缺失等边界场景
+- **I/O 截断** — 200 字符截断防止大 trace 导致 prompt 爆炸，是实用的防御性设计
+- **CLI 一致性** — `judge` 命令的 table/json 输出格式、错误处理模式与 `eval` 命令保持镜像对称
 
 **需要改进的地方**:
-- `__main__.py` 中 `main()` 直接在模块顶层调用，虽然对 `__main__.py` 文件来说功能上没问题（只在 `python -m` 时执行），但标准写法通常包裹在 `if __name__ == "__main__":` 中，便于未来如果有人意外 import 这个模块时不会触发副作用。这是一个很小的风格建议，不影响评分。
-- 各指标函数内部仍保留 `passed=score >= 0.7` 硬编码（如 metrics.py:50, 63, 101, 163, 191）。虽然会被 `evaluate()` 覆写，但如果有人直接调用单个指标函数（不通过 evaluate），这个 hardcoded 0.7 仍然不可配置。当前阶段这不是问题（独立调用时 0.7 是合理默认值），但如果未来需要支持单指标可配置 threshold，需要回来改。
+- **Code fence 剥离可更健壮** — `_parse_response` 中 `if text.startswith("```")` 按行首匹配过滤，如果 LLM 返回 `````json\n{...}\n````` 这种嵌套 fence 会出问题。建议改用正则 `re.sub(r'^```\w*\n|\n```$', '', text.strip())` 或只剥离首尾两行
+- **`JudgeConfig.dimensions` 的 mutable default** — `Field(default=["task_completion", "reasoning_quality"])` 虽然 Pydantic v2 会正确复制，但用 `default_factory` 更符合 Python 惯例，避免未来维护者误解
+- **`judge_cmd` 缺少 exit code 语义** — `eval` 命令用 `sys.exit(0 if report.passed else 1)` 表达 CI pass/fail，但 `judge` 命令成功时没有 exit code（隐式 0）。考虑加入 `--threshold` 选项，当 overall_score < threshold 时 exit 1，这样 CI 中可以用 judge 做质量门
+- **Proposal 中提到的 5 个维度只实现了 2 个** — task_completion 和 reasoning_quality 已实现，tool_use_appropriateness / information_synthesis / harm_avoidance 未实现。这在 Session 3 scope 中是合理的，但 `DIMENSION_PROMPTS` dict 应在后续 session 补全
 
 **下次 session 的建议**:
-- 按 proposal Session 3 推进 **LLM-as-judge scorer**——这是 trajeval 区别于纯规则引擎的核心差异化能力，也是项目最有价值的部分。
-- 建议先设计好 rubric prompt 的结构和 Anthropic SDK 的调用接口，再写实现。可以先用 mock/stub 让测试框架就位，再接入真实 API。
-- 考虑在 strategies/project-proposal.md 中更新 Session 3 的具体 scope，因为现在有了实际的代码基础，可以更精确地定义 LLM scorer 的 MVP 范围。
+- **优先级 1**: 按 proposal 推进 Session 4 — `trajeval compare <baseline> <current>` 回归检测，这是让工具在 CI 中真正有用的关键功能
+- **优先级 2**: 给 `judge` 命令加 `--threshold` 选项（小改动，但大幅提升 CI 可用性）
+- **可选**: 补充 3 个 judge dimension（tool_use_appropriateness, information_synthesis, harm_avoidance）的 prompt 定义到 `DIMENSION_PROMPTS`，纯配置变更无需改架构

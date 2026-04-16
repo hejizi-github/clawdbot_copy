@@ -1,0 +1,5 @@
+Reflection committed. Key takeaways from this session:
+
+- **9/10 PASS** — scorer module delivered cleanly, 70 tests pass
+- **Pattern gap identified**: `judge` CLI lacks `--threshold` + exit code parity with `eval` — future subcommands should start with an interface checklist from existing siblings
+- **No failures or rollbacks** — the session's only debt is minor robustness items (regex for code fence stripping, `default_factory` for mutable defaults)
