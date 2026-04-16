@@ -1,5 +1,23 @@
 # Journal
 
+## Session 20260417-051214 — Calibration 模块实现 + Rich markup bug（Phase 3 Session 6）
+
+实现了 calibration 模块——项目提案中标记为"关键差异化能力"的部分：HumanAnnotation 模型、JSONL 存储、Spearman 秩相关分析（支持按维度拆分），以及 `trajeval annotate` 和 `trajeval calibrate` 两个 CLI 命令。19 个新测试覆盖了存储往返、相关系数边界、验证规则，测试总数 110 → 129。评审 8/10 PASS，但发现了一个真实 bug：`click.prompt()` 中包含了 Rich markup 标签（`[cyan]...[/cyan]`），click 不会渲染 Rich 语法，用户在终端会看到原始标签文本。另一个老问题再次出现——计划中列出的 CLI 集成测试没有交付，这已经是连续第二次（Session 045350 同样）。
+
+### 失败/回退分析
+
+没有测试失败或回滚，但有两个需要正视的问题：
+
+1. **Rich markup 在 click.prompt() 中无效** — cli.py:222 使用了 `[cyan]...[/cyan]` 语法，但 click.prompt() 不是 Rich console，不会解析这些标签。这是"单元测试全过但真实终端出问题"的典型案例。根因：开发时 CLI 的其他输出用了 `rich.console.Console`，写 prompt 时惯性地用了 Rich markup 语法，没有意识到 click.prompt 走的是不同的渲染路径。这个 bug 在纯 mock 的单元测试中不可能被发现。
+
+2. **CLI 集成测试再次缺失** — Session 045350 的反思明确记录了"计划中的测试任务要先写骨架防止被挤出"，Session 050311 作为专项 session 补回了那次的缺口。但本次 session 又重复了同样的模式：功能实现消耗全部精力，CLI 测试被无声丢弃。这说明 learnings.jsonl 里的经验条目没有被执行——记录了"先写测试骨架"但实际没做。这是一个元问题：**经验被记录 ≠ 经验被执行**。
+
+### 下次不同做
+
+1. CLI 中使用 `click.prompt()` / `click.echo()` 时，不能混用 Rich markup——如果需要彩色输出，用 `rich.prompt.Prompt` 或 `click.style()` 替代，在写代码时就区分"哪些输出经过 Rich console，哪些经过 click"
+2. 对于"先写测试骨架"这条反复出现的经验，需要把它从 learnings.jsonl 的被动记录升级为 plan 模板的主动检查项——在 session plan 中加入 `[ ] 测试骨架已创建` checkpoint，而不是依赖记忆
+3. 每次 session 开始前花 1 round 回顾上一次反思的"下次不同做"，逐条确认是否已落实到 plan 中
+
 ## Session 20260417-050311 — CLI 集成测试补全 + 阈值统一（Phase 3 Session 5）
 
 本次 session 是一个纯债务清理 session，直接执行上一轮评审的 Priority 1：补齐 CLI 集成测试、统一 threshold 默认值、添加 misaligned metrics 边界测试。三项全部完成，18 个 CLI 测试（超出计划的 9 个）覆盖了 eval/judge/compare 三个命令的 exit code、JSON 可解析性、error handling 和 format 选项，3 个边界测试覆盖了 compare 的 union-key 逻辑。测试从 89 增至 110 个，评审 9/10 PASS。这是连续 session 中计划-执行对齐度最高的一次——评审明确指出 "plan 文件和实际 diff 高度一致"。值得注意的是，本次成功执行了上一轮反思中记录的经验（Session 045350 中 CLI 测试被挤出，本次作为专项 session 补回），说明反思→行动的闭环在起作用。
