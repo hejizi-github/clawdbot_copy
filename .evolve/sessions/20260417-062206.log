@@ -1,0 +1,25 @@
+# Session 20260417-062206 — wire recovery_window into MetricConfig + CLI (Phase 3 Session 14)
+
+## What was done
+Addressed the top priority from last review (9/10): `recovery_window` parameter was hardcoded in `evaluate()`, inconsistent with the other 4 metrics which all expose their parameters through `MetricConfig`.
+
+### Changes
+1. **MetricConfig** — added `recovery_window: int = 3` field
+2. **evaluate()** — now passes `config.recovery_window` to `error_recovery()`
+3. **CLI eval** — added `--recovery-window` flag, wired to MetricConfig
+4. **CLI compare** — added `--recovery-window` flag, wired to MetricConfig
+5. **Docstring** — clarified consecutive error semantics (each error independently checks its window)
+6. **Test fix** — renamed misleading `first_error_recovered` → `recovered_count`
+7. **README** — added error_recovery metric row and `--recovery-window` flag to eval/compare tables
+8. **4 new tests**: config flow-through, CLI eval flag, CLI compare flag, default value check
+
+## Metrics
+- Tests: 192 → 196 (all passing, 0.78s)
+- Files changed: 6
+- Lines: +115 / -3
+
+## Review items addressed
+- [x] recovery_window not in MetricConfig (Priority 1)
+- [x] first_error_recovered misleading variable name
+- [x] Consecutive error semantics not documented
+- [x] README missing error_recovery metric (bonus)
