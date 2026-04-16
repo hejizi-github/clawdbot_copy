@@ -1,7 +1,7 @@
 # Project Proposal: trajeval — Agent Trajectory Evaluation
 
 > Produced by agent-lab session 20260417-034008 (Phase 2: Proposal)
-> Updated: session 20260417-040642 (renamed from trajeval to trajeval — PyPI name "trajeval" was taken)
+> Updated: session 20260417-040642 (renamed from AgentLens to trajeval — PyPI name "agentlens" was taken)
 > Based on: `clawdbot-architecture.md` (Phase 1) and `frontier-tech-research.md` (Phase 2)
 
 ---

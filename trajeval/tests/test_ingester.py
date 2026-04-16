@@ -1,8 +1,6 @@
 """Tests for trace ingestion."""
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -70,7 +68,11 @@ class TestTokenAggregation:
         data = {
             "trace_id": "tok-001",
             "steps": [
-                {"type": "llm_call", "name": "m1", "tokens": {"prompt": 10, "completion": 5, "total": 15}}
+                {
+                    "type": "llm_call",
+                    "name": "m1",
+                    "tokens": {"prompt": 10, "completion": 5, "total": 15},
+                }
             ],
             "total_tokens": {"prompt": 100, "completion": 50, "total": 150},
         }

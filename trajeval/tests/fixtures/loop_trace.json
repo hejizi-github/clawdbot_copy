@@ -1,0 +1,69 @@
+{
+  "trace_id": "loop-trace-001",
+  "agent_name": "stuck-agent",
+  "task": "Find the config file",
+  "steps": [
+    {
+      "type": "llm_call",
+      "name": "claude-sonnet-4-6",
+      "input": {"prompt": "Find config.yaml"},
+      "output": {"response": "Let me search for it."},
+      "duration_ms": 300.0,
+      "tokens": {"prompt": 50, "completion": 20, "total": 70}
+    },
+    {
+      "type": "tool_call",
+      "name": "search_files",
+      "input": {"pattern": "config.yaml"},
+      "output": {"results": []},
+      "duration_ms": 100.0
+    },
+    {
+      "type": "llm_call",
+      "name": "claude-sonnet-4-6",
+      "input": {"prompt": "Try again with different path"},
+      "output": {"response": "Let me search again."},
+      "duration_ms": 280.0,
+      "tokens": {"prompt": 60, "completion": 15, "total": 75}
+    },
+    {
+      "type": "tool_call",
+      "name": "search_files",
+      "input": {"pattern": "*.yaml"},
+      "output": {"results": []},
+      "duration_ms": 110.0
+    },
+    {
+      "type": "llm_call",
+      "name": "claude-sonnet-4-6",
+      "input": {"prompt": "Maybe try another search"},
+      "output": {"response": "Searching one more time."},
+      "duration_ms": 290.0,
+      "tokens": {"prompt": 70, "completion": 18, "total": 88}
+    },
+    {
+      "type": "tool_call",
+      "name": "search_files",
+      "input": {"pattern": "config.*"},
+      "output": {"results": ["config.toml"]},
+      "duration_ms": 95.0
+    },
+    {
+      "type": "llm_call",
+      "name": "claude-sonnet-4-6",
+      "input": {"prompt": "Found config.toml, reading it"},
+      "output": {"response": "Reading the file."},
+      "duration_ms": 250.0,
+      "tokens": {"prompt": 80, "completion": 12, "total": 92}
+    },
+    {
+      "type": "tool_call",
+      "name": "read_file",
+      "input": {"path": "config.toml"},
+      "output": {"content": "key = value"},
+      "duration_ms": 50.0
+    }
+  ],
+  "final_output": "Found config.toml with content: key = value",
+  "total_duration_ms": 1475.0
+}
