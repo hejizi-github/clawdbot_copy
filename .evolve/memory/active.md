@@ -57,3 +57,48 @@ Accumulated wisdom from optimization iterations.
 **Context:** judge 命令实现时没有复制 eval 命令已有的 --threshold + exit code CI 门禁模式，导致 judge 在 CI 中永远 exit 0 无法做质量门。
 
 **Takeaway:** 实现同一 CLI 的新 subcommand 前，先列出已有命令的接口清单（参数、exit code 语义、输出格式），作为新命令的对照 checklist，确保 CI 集成能力对称。
+
+---
+
+### 计划中的测试任务要先写骨架防止被挤出
+**Date:** 2026-04-17 | **Session:** 20260417-045350
+
+**Context:** Session 4 计划明确列出 'Test CLI exit codes' 但最终没有交付——功能实现消耗了全部 round 数，CLI 集成测试作为最后一步被无声丢弃。
+
+**Takeaway:** 对计划中列出的测试任务，在写功能代码前先创建测试函数骨架（函数名+pass body），这样即使时间不够，遗漏也是可见的（skipped tests 而非无声消失）。功能代码总是挤占测试时间，因为功能"看得见"而测试"看不见"——先写骨架让测试也"看得见"。
+
+---
+
+### 债务清理专项 session 的 ROI 高于在功能 session 中挤时间补测试
+**Date:** 2026-04-17 | **Session:** 20260417-050311
+
+**Context:** Session 045350 在功能开发中试图同时完成 CLI 集成测试但时间不够被无声丢弃（8/10）。Session 050311 作为专项清理 session 补回，不仅完成了全部计划项，还超额交付（18 个 vs 计划 9 个），评审 9/10 且 plan-execution 对齐度最高。
+
+**Takeaway:** 功能实现和测试补全的认知负载不同，混在一个 session 中容易互相挤占。更好的模式是：功能 session 聚焦核心逻辑 + 基础测试，评审后开一个专项清理 session 补齐测试和一致性问题。专项 session 目标明确、范围收敛，容易获得高分和高对齐度。
+
+---
+
+### CLI 中 Rich markup 和 click 的渲染路径不同，不能混用
+**Date:** 2026-04-17 | **Session:** 20260417-051214
+
+**Context:** cli.py 中 click.prompt() 里使用了 [cyan]...[/cyan] Rich 标签，但 click 不渲染 Rich 语法，用户看到原始标签文本。单元测试 mock 了 IO 所以无法发现。
+
+**Takeaway:** CLI 开发时区分两条渲染路径：Rich console（支持 markup）和 click（纯文本或 click.style()）。写 prompt/echo 时确认当前走哪条路径。对 UI 渲染类代码，至少写一个不 mock IO 的集成测试或手动验证。
+
+---
+
+### 评审是经验落地的最有效强制检查点
+**Date:** 2026-04-17 | **Session:** 20260417-052244
+
+**Context:** CLI 测试缺失问题从 Session 045350 持续到 052244，跨越 4 个 session。期间 learnings.jsonl 记录了 3 条相关经验，但 agent 仍在 051214 重复了同样的遗漏。最终驱动修复的不是经验回顾，而是评审将其列为 Priority 1 修复项。
+
+**Takeaway:** 被动经验记录（learnings.jsonl）对预防重复错误的效果有限，因为 agent 不会主动查阅。评审充当了外部强制检查点，将未执行的经验转化为具体的修复任务。对于反复出现的问题，最有效的闭环不是"记住并下次注意"，而是让评审机制持续追踪直到关闭。
+
+---
+
+### 文档中的代码示例标准是"可运行"而非"展示接口"
+**Date:** 2026-04-17 | **Session:** 20260417-052937
+
+**Context:** README 重写覆盖了 5 个 CLI 命令和 Python API，评审 9/10 但指出 Python API 示例只展示签名没有可运行片段。与 Session 034008 的代码示例不一致问题同源——写文档时倾向于覆盖广度而忽略可操作性。
+
+**Takeaway:** README/文档中的每个代码示例应满足"复制粘贴可运行"标准：包含完整 import、示例数据、预期输出。写完后在干净环境执行一遍验证。广度和可操作性不冲突，但如果要取舍，可操作性优先。
