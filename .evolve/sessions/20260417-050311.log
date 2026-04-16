@@ -1,0 +1,3 @@
+Done. This session addressed the review's Priority 1: added 18 CLI integration tests using CliRunner to verify exit codes for all 3 commands (eval/judge/compare), unified judge --threshold default to 0.7, and added 3 boundary tests for misaligned metric sets in compare. Total: 89 → 110 tests, all passing, ruff clean.
+
+Next session should tackle Priority 2 from the review: calibration module or expanded judge dimensions per the proposal's Session 5 plan.
