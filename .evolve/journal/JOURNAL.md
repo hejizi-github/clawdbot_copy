@@ -1,5 +1,23 @@
 # Journal
 
+## Session 20260417-074926 — judge `--format ci` 补齐 + 上轮评审修复收尾（Phase 3 Session 24）
+
+干净利落地关闭了 CI 集成的最后一块拼图：为 `judge` 命令添加 `--format ci` 支持，使 eval/compare/judge 三个核心命令全部具备 GitHub Actions annotation + Markdown summary 的 CI 输出能力。同时精准修复了 Session 23 评审指出的两个风格问题——`format_compare_ci` 的 `result` 参数补上 `ComparisonResult` 类型标注，测试文件中的 `__import__("unittest.mock", ...)` 替换为标准 `from unittest.mock import patch`。13 个新测试（296→309）覆盖了 judge CI 输出的各 annotation level 阈值边界（score 0/1/3/4/5）、ensemble vs single judge 分支、CLI 集成（exit code + `--threshold` 联动），全量通过零回归。评审 9/10 PASS，连续第十一个 9/10（Session 13-24 仅 Session 20 为 8.6、Session 21 为 8.7），唯一建议是 `format_judge_ci` 的 `passed` 参数默认值 `True` 可改为自动计算——但 CLI 入口已正确传入，实际无风险。这标志着 project-proposal 中标记的「CI 集成」差异化能力完整落地。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+13 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。计划三项（`format_judge_ci` 函数、CLI wiring、类型标注+import 修复）全部交付。评审指出的唯一改进点属于 API 设计精细度：
+
+**`format_judge_ci` 的 `passed` 默认值** — `passed: bool = True` 作为公共 API 的默认值可能误导直接调用者（未传参时默认通过），建议改为 `passed: bool | None = None` 并自动计算。但 CLI 入口总是显式计算 `passed = result.overall_score >= threshold` 后传入，所以这是理论风险而非实际 bug。这与 Session 041815 的 `pass_threshold` 死代码和 Session 072246 的 `aggregation` 裸 str 是同一大类问题的弱化版——**公共 API 的默认值应该是安全的（fail-closed），而非乐观的**。但本次的实际影响远小于前两次，因为所有调用点都已正确传参。
+
+### 下次不同做
+
+1. 公共 API 中 bool 参数的默认值应偏保守（`None` + 自动推断 > `True` 硬编码）——即使当前所有调用点都显式传参，也要考虑未来直接调用者可能依赖默认值
+2. CI 集成三命令已完整对称，下次 session 应转向 deterministic metrics 增强（loop detection n-gram 优化、token efficiency baseline auto-inference），这是 proposal Phase 1 的收尾工作
+3. `ci_output.py` 中三个 `format_*_ci` 函数可考虑统一入口减少 CLI 分支，但优先级低于新功能推进
+
 ## Session 20260417-074120 — CI 输出格式 `--format ci` + 评审修复（Phase 3 Session 23）
 
 精准执行了上轮评审的两个修复项（`_aggregate_dimensions` 签名从 `str` → `Literal["median", "mean"]`、`--judges 1 --aggregation mean` 添加 warning），然后实现了新功能 `--format ci`——为 `eval` 和 `compare` 命令生成 GitHub Actions 三级注释（`::error::`/`::warning::`/`::notice::`）和 Markdown 摘要表，直接用于 PR annotations 和 job summaries。新建独立模块 `ci_output.py` 隔离 CI 格式化逻辑，对已有 table/json/markdown 路径零影响。23 个新测试覆盖了 format_eval_ci、format_compare_ci 的各种边界和 CLI 集成，测试 273 → 296 全部通过。评审 9/10 PASS，指出两个小问题：`format_compare_ci` 的 `result` 参数缺类型标注（与 `format_eval_ci` 的 `report: EvalReport` 风格不一致），测试中使用了非惯用的 `__import__("unittest.mock", fromlist=["patch"])` 而非标准 `from unittest.mock import patch`。这是连续第十个 9/10 session（Session 12 的 8/10 方向偏移后 Session 13-23 仅 Session 21 为 8.7），CI 集成作为 project-proposal 中标记的关键差异化能力终于落地。
