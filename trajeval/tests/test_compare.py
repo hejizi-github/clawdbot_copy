@@ -118,6 +118,36 @@ class TestCompareReports:
         result = compare_reports(baseline, current, tolerance=0.1)
         assert result.tolerance == 0.1
 
+    def test_misaligned_metrics_baseline_extra(self):
+        baseline = _make_report("b1", [("m1", 0.9, True), ("m2", 0.8, True)], 0.85)
+        current = _make_report("c1", [("m1", 0.85, True)], 0.85)
+        result = compare_reports(baseline, current, tolerance=0.05)
+        deltas = {d.name: d for d in result.metric_deltas}
+        assert "m1" in deltas
+        assert "m2" in deltas
+        assert deltas["m2"].current_score == 0.0
+        assert deltas["m2"].baseline_score == 0.8
+        assert deltas["m2"].is_regression is True
+
+    def test_misaligned_metrics_current_extra(self):
+        baseline = _make_report("b1", [("m1", 0.8, True)], 0.8)
+        current = _make_report("c1", [("m1", 0.85, True), ("m_new", 0.7, True)], 0.775)
+        result = compare_reports(baseline, current, tolerance=0.05)
+        deltas = {d.name: d for d in result.metric_deltas}
+        assert "m_new" in deltas
+        assert deltas["m_new"].baseline_score == 0.0
+        assert deltas["m_new"].current_score == 0.7
+        assert deltas["m_new"].direction == "improved"
+
+    def test_completely_disjoint_metrics(self):
+        baseline = _make_report("b1", [("only_baseline", 0.9, True)], 0.9)
+        current = _make_report("c1", [("only_current", 0.8, True)], 0.8)
+        result = compare_reports(baseline, current, tolerance=0.05)
+        names = [d.name for d in result.metric_deltas]
+        assert "only_baseline" in names
+        assert "only_current" in names
+        assert len(result.metric_deltas) == 2
+
 
 class TestFormatMarkdown:
     def test_no_regression_header(self):

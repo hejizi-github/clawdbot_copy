@@ -80,7 +80,7 @@ def eval(
     help="Comma-separated dimensions to evaluate",
 )
 @click.option(
-    "--threshold", type=float, default=0.6, help="Pass/fail threshold (0.0-1.0, default 0.6)"
+    "--threshold", type=float, default=0.7, help="Pass/fail threshold (0.0-1.0, default 0.7)"
 )
 def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold: float):
     """Evaluate an agent trace using an LLM-as-judge."""
@@ -231,7 +231,7 @@ def _print_comparison(result):
     console.print(table)
 
 
-def _print_judge_report(trace, result, threshold: float = 0.6, passed: bool = True):
+def _print_judge_report(trace, result, threshold: float = 0.7, passed: bool = True):
     info = Table(title=f"Judge: {trace.trace_id[:24]}", show_header=False)
     info.add_column("Field", style="dim")
     info.add_column("Value")
