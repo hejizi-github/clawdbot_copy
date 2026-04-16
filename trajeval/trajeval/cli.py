@@ -13,6 +13,7 @@ from rich.table import Table
 from . import __version__
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
+from .scorer import JudgeConfig, judge
 
 console = Console()
 
@@ -66,6 +67,77 @@ def eval(
         _print_report(trace, report)
 
     sys.exit(0 if report.passed else 1)
+
+
+@main.command(name="judge")
+@click.argument("trace_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--model", default="claude-sonnet-4-6", help="Model for LLM judge")
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+@click.option(
+    "--dimensions",
+    default="task_completion,reasoning_quality",
+    help="Comma-separated dimensions to evaluate",
+)
+def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str):
+    """Evaluate an agent trace using an LLM-as-judge."""
+    try:
+        trace = ingest_json(trace_file)
+    except IngestError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+    config = JudgeConfig(
+        model=model,
+        dimensions=[d.strip() for d in dimensions.split(",")],
+    )
+    result = judge(trace, config=config)
+
+    if result.error:
+        console.print(f"[red]Judge error:[/red] {result.error}")
+        sys.exit(1)
+
+    if fmt == "json":
+        output = {
+            "trace_id": result.trace_id,
+            "overall_score": result.overall_score,
+            "model": result.model,
+            "dimensions": [d.model_dump() for d in result.dimensions],
+        }
+        click.echo(json.dumps(output, indent=2))
+    else:
+        _print_judge_report(trace, result)
+
+
+def _print_judge_report(trace, result):
+    info = Table(title=f"Judge: {trace.trace_id[:24]}", show_header=False)
+    info.add_column("Field", style="dim")
+    info.add_column("Value")
+    info.add_row("Agent", trace.agent_name)
+    info.add_row("Task", trace.task or "(none)")
+    info.add_row("Model", result.model)
+    info.add_row("Steps", str(trace.step_count))
+    console.print(info)
+    console.print()
+
+    scores = Table(title="LLM Judge Scores")
+    scores.add_column("Dimension", style="cyan")
+    scores.add_column("Score", justify="right")
+    scores.add_column("Explanation")
+
+    for d in result.dimensions:
+        score_color = "green" if d.score >= 4 else "yellow" if d.score >= 3 else "red"
+        scores.add_row(d.name, f"[{score_color}]{d.score}/5[/{score_color}]", d.explanation)
+
+    scores.add_section()
+    overall_pct = f"{result.overall_score:.0%}"
+    if result.overall_score >= 0.8:
+        overall_color = "green bold"
+    elif result.overall_score >= 0.6:
+        overall_color = "yellow bold"
+    else:
+        overall_color = "red bold"
+    scores.add_row("[bold]Overall[/bold]", f"[{overall_color}]{overall_pct}[/{overall_color}]", "")
+    console.print(scores)
 
 
 def _print_report(trace, report):
