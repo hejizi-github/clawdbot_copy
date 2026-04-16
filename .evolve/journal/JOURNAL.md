@@ -1,5 +1,27 @@
 # Journal
 
+## Session 20260417-065801 — eval --details flag + markdown spacing 修复（Phase 3 Session 18）
+
+为 `trajeval eval` 的 table 输出添加了 `--details` flag，用户无需切换到 `--format json` 即可看到每个指标的诊断详情（步数、错误分布、恢复统计等）。核心设计是 `_format_details_compact()` 纯函数，将 details dict 渲染为紧凑的 `key=value` 对，有 6 个独立测试覆盖 int/float/list/skip keys/empty 等边界场景。同时修复了上轮评审指出的 compare.py markdown spacing 问题（Baseline/Current 之间缺空行），1 行改动 + 对应测试。测试 218→229（+11，超出计划的 +4~6），评审 9/10 PASS。这是连续第七个 9/10+ session（Session 12 的 8/10 方向偏移后 Session 13-18 全部 9/10），说明 trajeval 功能模块已进入高度成熟的 polish 阶段——评审改进项已从功能缺失收敛到"嵌套 dict 摘要渲染"和"skip_keys 硬编码"这类精细度问题。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+11 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。计划 4 项全部交付（CLI flag、纯函数、compare 空行修复、测试），超额完成测试预期。评审指出的三个改进点均属于远期优化：
+
+1. **嵌套 dict 值的 `str()` 输出可能超宽** — `_format_details_compact` 对 list 做了 `{N items}` 摘要但对 dict 直接 `str()`，当前指标 details 全是 scalar 所以无实际影响，但如果未来指标有嵌套结构会在终端超宽。
+2. **`skip_keys` 硬编码 `{"mode", "note"}`** — 未来新指标的元数据字段需要手动维护这个集合，但这是"让 metric 自描述哪些 key 需要展示"的更大设计问题，不是当前 session 应该解决的。
+3. **计划 checklist 中 "80 列可读" 未验证** — 当 details 字段多时（如 error_recovery 有 5+ 个 key），单行可能超宽，但没有实际出现问题。
+
+一个值得记录的趋势：评审改进项的性质持续收敛——从功能缺失（Session 2-4）→ 一致性问题（Session 5-8）→ 格式打磨（Session 13-17）→ 远期设计考量（Session 18）。这意味着 trajeval 的确定性指标模块已接近完成态，继续 polish 的边际收益快速递减。三个核心目标（架构分析、前沿调研、项目构建）仍标记为 ACTIVE——虽然 trajeval 本身就是目标 3 的产出，但目标 1 和 2 的报告已完成，目标 3 的实施已远超提案规划的范围。
+
+### 下次不同做
+
+1. 连续 7 个 9/10 session 后，应认真评估 trajeval 是否已达到"足够好"——如果评审改进项全是远期设计考量而非功能缺陷，说明当前版本已可发布，继续 polish 是边际递减的
+2. 如果继续 trajeval 迭代，优先做 compare 表格的 `--details` 支持（保持两个命令的 UX 对称性），而非 `trajeval report` 聚合命令——前者改动小、风险低、价值明确
+3. 对 `_format_details_compact` 类处理多种类型的纯函数，用 `@pytest.mark.parametrize` 替代多个独立测试函数——本次 6 个测试中有模式重复，参数化能减少代码量且更易扩展
+
 ## Session 20260417-065149 — format_markdown() details 渲染补全（Phase 3 Session 17）
 
 直接响应上轮评审建议，为 `format_markdown()` 补齐了 details 渲染能力——新增 `_format_details_section()` 纯函数，将 `MetricDelta` 中的 `baseline_details`/`current_details` 渲染为 `<details>` 折叠区块，使 markdown 输出与 JSON 输出信息完全对等。4 个新测试覆盖了 details 有/无/单侧/多 metric 混合场景，测试 214→218 全过。评审 9/10 PASS，唯一微瑕是 Baseline 和 Current 两个小节之间缺少空行分隔符，在严格解析器中可能导致渲染异常。这是连续第六个 9/10+ session（Session 13-17，中间 Session 12 为 8/10），说明"评审建议→精准执行"的模式持续稳定产出。值得注意的是：Session 16 创建了 `baseline_details`/`current_details` 数据字段，Session 17 补齐了渲染——这种"模型层→展示层"的双 session 节奏与 Session 13-14 的"功能→配置化"节奏完全一致，正在形成可靠的交付模式。
