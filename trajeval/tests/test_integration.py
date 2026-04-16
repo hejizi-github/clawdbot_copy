@@ -21,7 +21,7 @@ from trajeval.calibration import (
 )
 from trajeval.cli import main
 from trajeval.compare import compare_reports
-from trajeval.ingester import ingest_json
+from trajeval.ingester import IngestError, ingest_json
 from trajeval.metrics import EvalReport, MetricConfig, evaluate
 from trajeval.scorer import JudgeConfig, JudgeResult, judge
 
@@ -209,37 +209,37 @@ class TestJudgeWithFakeClient:
         assert len(result.dimensions) == 2
         assert result.overall_score == (5 + 2) / 10
 
-    def test_judge_cli_with_fake_client_exit_codes(self):
-        """Verify CLI judge exit codes using a fake client via patch at the judge function level."""
-        from unittest.mock import patch
+    def test_judge_cli_with_fake_client_exit_codes(self, monkeypatch):
+        """Verify CLI judge exit codes by injecting FakeAnthropicClient via sys.modules.
 
-        good_result = JudgeResult(
-            trace_id="test-trace-001",
-            dimensions=[],
-            overall_score=0.9,
-            model="fake",
-        )
-        bad_result = JudgeResult(
-            trace_id="test-trace-001",
-            dimensions=[],
-            overall_score=0.3,
-            model="fake",
-        )
+        Instead of patching the entire judge() function, we inject a fake anthropic
+        module so the full chain runs: CLI → judge() → build_user_prompt → fake API → parse → normalize.
+        """
+        import sys
 
         runner = CliRunner()
-        with patch("trajeval.cli.judge", return_value=good_result):
-            r = runner.invoke(main, [
-                "judge", str(FIXTURES_DIR / "simple_trace.json"),
-                "--threshold", "0.7",
-            ])
-            assert r.exit_code == 0
 
-        with patch("trajeval.cli.judge", return_value=bad_result):
-            r = runner.invoke(main, [
-                "judge", str(FIXTURES_DIR / "simple_trace.json"),
-                "--threshold", "0.7",
-            ])
-            assert r.exit_code == 1
+        high_client = FakeAnthropicClient({"task_completion": 5, "reasoning_quality": 4})
+        fake_anthropic = type("FakeAnthropicModule", (), {
+            "Anthropic": staticmethod(lambda: high_client),
+        })()
+        monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+        r = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.7",
+        ])
+        assert r.exit_code == 0
+
+        low_client = FakeAnthropicClient({"task_completion": 1, "reasoning_quality": 1})
+        fake_anthropic_low = type("FakeAnthropicModule", (), {
+            "Anthropic": staticmethod(lambda: low_client),
+        })()
+        monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic_low)
+        r = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.7",
+        ])
+        assert r.exit_code == 1
 
 
 class TestCalibrationPipeline:
@@ -281,7 +281,7 @@ class TestCalibrationPipeline:
         assert loaded[0].trace_id == "t1"
         assert loaded[0].dimensions[0].score == 4
 
-    def test_full_calibration_with_correlation(self, tmp_path):
+    def test_full_calibration_with_correlation(self):
         annotations = [
             HumanAnnotation(trace_id=f"t{i}", dimension="task_completion", human_score=score)
             for i, score in enumerate([1, 2, 3, 4, 5], start=1)
@@ -299,7 +299,7 @@ class TestCalibrationPipeline:
         assert result.total_pairs == 5
         assert result.overall_spearman_rho == 1.0  # perfect correlation
 
-    def test_calibration_with_disagreement(self, tmp_path):
+    def test_calibration_with_disagreement(self):
         annotations = [
             HumanAnnotation(trace_id=f"t{i}", dimension="task_completion", human_score=score)
             for i, score in enumerate([5, 4, 3, 2, 1], start=1)
@@ -453,3 +453,177 @@ class TestReadmePythonAPI:
             assert hasattr(d, "name")
             assert hasattr(d, "score")
             assert hasattr(d, "explanation")
+
+
+class TestBoundaryScenarios:
+    """Edge cases: empty traces, large traces, missing fields, malformed input."""
+
+    EMPTY_TRACE = {
+        "trace_id": "empty-001",
+        "agent_name": "empty-agent",
+        "task": "Do nothing",
+        "steps": [],
+    }
+
+    SINGLE_STEP_TRACE = {
+        "trace_id": "single-001",
+        "agent_name": "single-agent",
+        "task": "One step only",
+        "steps": [
+            {
+                "type": "llm_call",
+                "name": "claude-sonnet",
+                "input": {"prompt": "Hello"},
+                "output": {"response": "Hi"},
+                "duration_ms": 100.0,
+                "tokens": {"prompt": 10, "completion": 5, "total": 15},
+            }
+        ],
+    }
+
+    ALL_ERRORS_TRACE = {
+        "trace_id": "errors-001",
+        "agent_name": "error-agent",
+        "task": "Everything fails",
+        "steps": [
+            {"type": "error", "name": "crash_1", "input": {}, "output": {"error": "boom"}},
+            {"type": "error", "name": "crash_2", "input": {}, "output": {"error": "bang"}},
+            {"type": "error", "name": "crash_3", "input": {}, "output": {"error": "splat"}},
+        ],
+    }
+
+    def test_empty_trace_eval(self):
+        trace = ingest_json(self.EMPTY_TRACE)
+        assert trace.step_count == 0
+        assert len(trace.tool_calls) == 0
+        assert len(trace.llm_calls) == 0
+
+        report = evaluate(trace)
+        assert isinstance(report, EvalReport)
+        assert report.overall_score == 1.0
+        assert report.passed is True
+
+        for m in report.metrics:
+            assert m.score == 1.0
+
+    def test_empty_trace_judge(self):
+        trace = ingest_json(self.EMPTY_TRACE)
+        client = FakeAnthropicClient({"task_completion": 0, "reasoning_quality": 0})
+        result = judge(trace, config=JudgeConfig(dimensions=["task_completion", "reasoning_quality"]), client=client)
+        assert result.error is None
+        assert result.overall_score == 0.0
+
+    def test_empty_trace_compare_no_regression(self):
+        trace = ingest_json(self.EMPTY_TRACE)
+        report = evaluate(trace)
+        result = compare_reports(report, report)
+        assert result.has_regression is False
+
+    def test_single_step_trace_eval(self):
+        trace = ingest_json(self.SINGLE_STEP_TRACE)
+        assert trace.step_count == 1
+
+        report = evaluate(trace)
+        assert report.overall_score > 0
+        assert len(report.metrics) == 4
+
+    def test_all_error_steps_eval(self):
+        trace = ingest_json(self.ALL_ERRORS_TRACE)
+        assert len(trace.errors) == 3
+
+        report = evaluate(trace)
+        eff = next(m for m in report.metrics if m.name == "step_efficiency")
+        assert eff.score == 0.0
+        assert eff.details["error_steps"] == 3
+
+    def test_large_trace_performance(self):
+        """50+ step trace should evaluate in under 1 second."""
+        import time
+
+        steps = []
+        for i in range(60):
+            steps.append({
+                "type": "tool_call" if i % 3 == 0 else "llm_call",
+                "name": f"step_{i}",
+                "input": {"data": f"input_{i}"},
+                "output": {"result": f"output_{i}"},
+                "duration_ms": 100.0,
+                "tokens": {"prompt": 50, "completion": 20, "total": 70},
+            })
+
+        large_trace = {
+            "trace_id": "large-001",
+            "agent_name": "large-agent",
+            "task": "Complex multi-step task",
+            "steps": steps,
+        }
+
+        start = time.monotonic()
+        trace = ingest_json(large_trace)
+        report = evaluate(trace)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0
+        assert trace.step_count == 60
+        assert len(report.metrics) == 4
+        assert 0.0 <= report.overall_score <= 1.0
+
+    def test_large_trace_judge_prompt_building(self):
+        """Verify judge prompt is built correctly for a 50+ step trace."""
+        from trajeval.scorer import build_user_prompt
+
+        steps = [
+            {
+                "type": "llm_call",
+                "name": f"model_{i}",
+                "input": {"prompt": f"question_{i}"},
+                "output": {"response": f"answer_{i}"},
+                "duration_ms": 50.0,
+                "tokens": {"prompt": 10, "completion": 5, "total": 15},
+            }
+            for i in range(55)
+        ]
+        trace = ingest_json({"trace_id": "large-judge", "steps": steps})
+        prompt = build_user_prompt(trace, ["task_completion"])
+        assert "Steps (55 total)" in prompt
+        assert "Step 1" in prompt
+        assert "Step 55" in prompt
+
+    def test_missing_optional_fields(self):
+        minimal = {"steps": [{"type": "llm_call", "name": "x"}]}
+        trace = ingest_json(minimal)
+        assert trace.agent_name == "unknown"
+        assert trace.task == ""
+        assert trace.trace_id  # auto-generated UUID
+        assert trace.step_count == 1
+
+        report = evaluate(trace)
+        assert isinstance(report, EvalReport)
+
+    def test_malformed_json_string_raises(self):
+        import pytest
+
+        with pytest.raises(IngestError, match="Invalid JSON"):
+            ingest_json("{broken json!!!")
+
+    def test_malformed_steps_not_list_raises(self):
+        import pytest
+
+        with pytest.raises(IngestError, match="must be a list"):
+            ingest_json({"steps": "not a list"})
+
+    def test_empty_trace_cli_eval(self):
+        """CLI eval on empty trace should still produce valid output."""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(self.EMPTY_TRACE, f)
+            f.flush()
+            runner = CliRunner()
+            r = runner.invoke(main, [
+                "eval", f.name, "--format", "json", "--threshold", "0.5",
+            ])
+            assert r.exit_code == 0
+            data = json.loads(r.output)
+            assert data["overall_score"] == 1.0
+            assert data["passed"] is True
