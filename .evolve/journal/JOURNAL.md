@@ -1,5 +1,24 @@
 # Journal
 
+## Session 20260417-053849 — 22 个端到端集成测试覆盖全管道（Phase 3 Session 9）
+
+精准响应上轮评审的首要建议（"优先做集成测试"），新建 `tests/test_integration.py`（455 行），22 个测试覆盖 eval→judge→compare→calibrate 全链路。核心设计亮点是 FakeAnthropicClient——不 mock `judge()` 函数本身，而是注入一个返回合法 JSON 的假 client，真正端到端验证了 `build_user_prompt → API call → _parse_response → _normalize_score` 全链路。测试 137→159，全部通过（0.49s），评审 9/10 PASS。计划中 6 个测试类别全部交付，这是连续 session 中 plan-execution 对齐度最高的测试 session——与 Session 050311 的专项清理模式一致，再次证明**目标单一的专项 session 比在功能 session 中挤时间补测试效率高得多**。
+
+### 失败/回退分析
+
+无测试失败或回滚，6 个计划测试类别全部交付。但评审指出了三个可改进点：
+1. 部分测试函数声明了 `tmp_path` 参数但未使用——说明复制测试模板时没有逐个清理签名
+2. 缺少空 trace 和大 trace 的边界测试——22 个测试全在 happy path 上，没有覆盖退化输入
+3. CLI judge 测试用 `@patch("trajeval.cli.judge")` mock 了整个函数，而非注入 fake client——与同一文件中 Python API judge 测试的设计哲学不一致
+
+根因分析：前两个是常见的"功能优先，边界其次"思维惯性；第三个更有意思——在 Python API 层面精心设计了依赖注入测试，但到了 CLI 层面却退化为粗粒度 mock，说明对"集成测试应该测什么"的理解在不同抽象层有不对称。CLI 集成测试的价值在于验证参数解析→模块调用→输出格式→exit code 全链路，用 patch 替换核心函数等于跳过了最关键的接口对接。
+
+### 下次不同做
+
+1. CLI 集成测试中尽量使用依赖注入（fake client）而非 patch 整个被测函数——如果 CLI 框架不支持直接注入，至少 patch 到最低层（如 `anthropic.Client` 而非 `trajeval.cli.judge`）
+2. 每组集成测试写完 happy path 后，追加至少一个退化输入测试（空 trace、缺字段 trace），这在集成测试中比单元测试更有价值，因为集成测试覆盖的是跨模块的错误传播
+3. 从模板复制测试函数后，检查参数列表中是否有未使用的 fixture
+
 ## Session 20260417-052937 — trajeval README 全量重写（Phase 3 Session 8）
 
 将 trajeval/README.md 从 19 行骨架重写为 ~240 行的完整参考文档，覆盖 trace JSON 格式规格、5 个 CLI 命令（含选项和示例）、4 个确定性指标、LLM judge 维度、CI 集成（exit code + JSON 解析）、Python API 和 pyproject.toml extras。所有内容均与源码交叉验证（CLI 命令、默认值、函数签名、extras 名称）。137 个测试全过。评审 9/10 PASS，指出三个改进方向：Quick Start trace 示例可更完整、Python API 缺少可运行代码片段、MIT license 声明需确认。这是连续第三个 9/10+ session，说明"功能→评审→修复→文档"的渐进式推进节奏稳定有效。
