@@ -1,0 +1,20 @@
+# Session 20260417-070605 — compare --details flag (Phase 3 Session 19)
+
+为 `trajeval compare` 的 table 输出添加了 `--details` flag，展示每个指标的 baseline 和 current 诊断详情（步数、错误分布、恢复统计等），与 Session 18 中 `eval --details` 实现完全对称。复用了已有的 `_format_details_compact()` 纯函数，未重复实现。compare 表格在 `--details` 模式下显示 "Baseline Details" 和 "Current Details" 两列，Overall 行用空字符串占位保持列数一致。`--format json` 和 `--format markdown` 时 `--details` flag 被正确忽略（json 已有完整 details，markdown 有 collapsible sections）。
+
+测试 229→234（+5），全部通过。新增 5 个测试覆盖：details 列显示/隐藏、指标信息可见、json 格式忽略、markdown 格式忽略。
+
+## 完成项
+1. CLI flag `--details` (is_flag=True) 添加到 compare command
+2. `_print_comparison` 支持 show_details 参数，添加两列 details
+3. 5 个新测试验证所有场景
+4. 与 eval --details 的 UX 对称性完成
+
+## 改动文件
+- `trajeval/trajeval/cli.py` — 添加 --details flag、修改 _print_comparison
+- `trajeval/tests/test_cli.py` — 5 个新测试
+
+## 技术决策
+- 复用 `_format_details_compact` 而非为 compare 写新的格式化逻辑
+- 两列（baseline + current）而非单列 diff，因为用户需要对比两边的诊断信息
+- Rich table 在窄终端会截断列内容，测试断言用部分匹配（"total_ste" 而非 "total_steps="）适应 CliRunner 的 80 列宽度
