@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .calibration import AnnotationStore, HumanAnnotation, _load_judge_results, compute_correlation
 from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
@@ -180,6 +181,135 @@ def compare(
         _print_comparison(result)
 
     sys.exit(1 if result.has_regression else 0)
+
+
+@main.command()
+@click.argument("trace_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--output", "-o", type=click.Path(path_type=Path),
+    default="annotations.jsonl", help="Annotations output file (JSONL)",
+)
+@click.option(
+    "--dimensions",
+    default="task_completion,reasoning_quality",
+    help="Comma-separated dimensions to annotate",
+)
+@click.option("--annotator", default="default", help="Annotator identifier")
+def annotate(trace_file: Path, output: Path, dimensions: str, annotator: str):
+    """Interactively annotate a trace with human scores."""
+    try:
+        trace = ingest_json(trace_file)
+    except IngestError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+    console.print(f"\n[bold]Trace:[/bold] {trace.trace_id[:24]}")
+    console.print(f"[bold]Agent:[/bold] {trace.agent_name}")
+    console.print(f"[bold]Task:[/bold] {trace.task or '(none)'}")
+    console.print(f"[bold]Steps:[/bold] {trace.step_count}\n")
+
+    for i, step in enumerate(trace.steps):
+        console.print(f"  [dim]Step {i+1}[/dim] [{step.type}] {step.name}")
+
+    console.print(f"\n[bold]Final output:[/bold] {trace.final_output or '(none)'}\n")
+
+    dim_list = [d.strip() for d in dimensions.split(",")]
+    store = AnnotationStore(output)
+    annotations = []
+
+    for dim in dim_list:
+        while True:
+            score_str = click.prompt(
+                f"Score for [cyan]{dim}[/cyan] (0-5)", type=str,
+            )
+            try:
+                score = int(score_str)
+                if 0 <= score <= 5:
+                    break
+                console.print("[red]Score must be 0-5[/red]")
+            except ValueError:
+                console.print("[red]Enter an integer 0-5[/red]")
+
+        annotations.append(HumanAnnotation(
+            trace_id=trace.trace_id,
+            dimension=dim,
+            human_score=score,
+            annotator=annotator,
+        ))
+
+    store.save_batch(annotations)
+    console.print(f"\n[green]Saved {len(annotations)} annotations to {output}[/green]")
+
+
+@main.command()
+@click.argument("annotations_file", type=click.Path(exists=True, path_type=Path))
+@click.argument("judgments_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+def calibrate(annotations_file: Path, judgments_file: Path, fmt: str):
+    """Compute correlation between human annotations and LLM judge scores."""
+    store = AnnotationStore(annotations_file)
+    annotations = store.load()
+    if not annotations:
+        console.print("[red]No annotations found[/red]")
+        sys.exit(1)
+
+    try:
+        judge_results = _load_judge_results(judgments_file)
+    except Exception as e:
+        console.print(f"[red]Error loading judgments:[/red] {e}")
+        sys.exit(1)
+
+    if not judge_results:
+        console.print("[red]No judge results found[/red]")
+        sys.exit(1)
+
+    result = compute_correlation(annotations, judge_results)
+
+    if fmt == "json":
+        click.echo(json.dumps(result.model_dump(), indent=2))
+    else:
+        _print_calibration(result)
+
+
+def _print_calibration(result):
+    table = Table(title="Calibration: Human vs LLM-Judge")
+    table.add_column("Dimension", style="cyan")
+    table.add_column("Spearman ρ", justify="right")
+    table.add_column("p-value", justify="right")
+    table.add_column("Samples", justify="right")
+
+    for dim in result.dimensions:
+        if dim.spearman_rho >= 0.7:
+            rho_color = "green"
+        elif dim.spearman_rho >= 0.4:
+            rho_color = "yellow"
+        else:
+            rho_color = "red"
+        sig = "green" if dim.p_value < 0.05 else "yellow"
+        table.add_row(
+            dim.dimension,
+            f"[{rho_color}]{dim.spearman_rho:.4f}[/{rho_color}]",
+            f"[{sig}]{dim.p_value:.6f}[/{sig}]",
+            str(dim.sample_size),
+        )
+
+    table.add_section()
+    if result.overall_spearman_rho >= 0.7:
+        rho_color = "green bold"
+    elif result.overall_spearman_rho >= 0.4:
+        rho_color = "yellow bold"
+    else:
+        rho_color = "red bold"
+    table.add_row(
+        "[bold]Overall[/bold]",
+        f"[{rho_color}]{result.overall_spearman_rho:.4f}[/{rho_color}]",
+        f"{result.overall_p_value:.6f}",
+        str(result.total_pairs),
+    )
+    console.print(table)
+
+    for w in result.warnings:
+        console.print(f"[yellow]⚠ {w}[/yellow]")
 
 
 def _print_comparison(result):

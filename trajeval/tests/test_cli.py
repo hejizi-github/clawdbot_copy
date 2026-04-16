@@ -64,7 +64,7 @@ class TestEvalCommand:
         data = json.loads(result.output)
         assert data["passed"] is False
 
-    def test_error_trace_has_lower_scores(self):
+    def test_error_trace_parseable(self):
         runner = CliRunner()
         result = runner.invoke(main, [
             "eval", str(FIXTURES_DIR / "error_trace.json"),
