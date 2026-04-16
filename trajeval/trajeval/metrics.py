@@ -170,6 +170,45 @@ def loop_detection(
     )
 
 
+def error_recovery(
+    trace: AgentTrace, recovery_window: int = 3,
+) -> MetricResult:
+    """Measure how well the agent recovers from errors.
+
+    For each error step, checks whether a successful step (non-error) appears
+    within the next `recovery_window` steps. Score = recovered / total_errors.
+    """
+    errors = [i for i, s in enumerate(trace.steps) if s.type == "error"]
+
+    if not errors:
+        return MetricResult(
+            name="error_recovery",
+            score=1.0,
+            passed=True,
+            details={"total_errors": 0, "note": "no errors in trace"},
+        )
+
+    recovered = 0
+    for err_idx in errors:
+        window = trace.steps[err_idx + 1 : err_idx + 1 + recovery_window]
+        if any(s.type != "error" for s in window):
+            recovered += 1
+
+    total = len(errors)
+    score = recovered / total
+    return MetricResult(
+        name="error_recovery",
+        score=round(score, 4),
+        passed=score >= 0.7,
+        details={
+            "total_errors": total,
+            "recovered": recovered,
+            "unrecovered": total - recovered,
+            "recovery_window": recovery_window,
+        },
+    )
+
+
 def token_efficiency(
     trace: AgentTrace, baseline_tokens: int | None = None
 ) -> MetricResult:
@@ -228,6 +267,7 @@ def evaluate(trace: AgentTrace, config: MetricConfig | None = None) -> EvalRepor
             min_repeats=config.loop_min_repeats,
         ),
         token_efficiency(trace, baseline_tokens=config.baseline_tokens),
+        error_recovery(trace),
     ]
 
     threshold = config.pass_threshold

@@ -1,9 +1,12 @@
 """Tests for deterministic metrics engine."""
 
+import pytest
+
 from trajeval.ingester import ingest_json
 from trajeval.metrics import (
     EvalReport,
     MetricConfig,
+    error_recovery,
     evaluate,
     loop_detection,
     step_efficiency,
@@ -216,7 +219,7 @@ class TestEvaluate:
         report = evaluate(trace)
         assert isinstance(report, EvalReport)
         assert report.trace_id == "test-trace-001"
-        assert len(report.metrics) == 4
+        assert len(report.metrics) == 5
         assert report.overall_score > 0.0
 
     def test_all_pass(self, simple_trace_path):
@@ -288,3 +291,167 @@ class TestEvaluate:
         step_m_high = next(m for m in high_report.metrics if m.name == "step_efficiency")
         assert step_m_high.score == 0.75
         assert step_m_high.passed is False
+
+
+class TestErrorRecovery:
+    def test_no_errors(self):
+        trace = AgentTrace(
+            trace_id="r1",
+            steps=[
+                TraceStep(type="llm_call", name="m1"),
+                TraceStep(type="tool_call", name="t1"),
+            ],
+        )
+        result = error_recovery(trace)
+        assert result.name == "error_recovery"
+        assert result.score == 1.0
+        assert result.passed is True
+        assert result.details["total_errors"] == 0
+
+    def test_empty_trace(self):
+        trace = AgentTrace(trace_id="r2")
+        result = error_recovery(trace)
+        assert result.score == 1.0
+        assert result.details["total_errors"] == 0
+
+    def test_full_recovery(self):
+        trace = AgentTrace(
+            trace_id="r3",
+            steps=[
+                TraceStep(type="error", name="fail1"),
+                TraceStep(type="llm_call", name="retry1"),
+                TraceStep(type="error", name="fail2"),
+                TraceStep(type="tool_call", name="fix2"),
+            ],
+        )
+        result = error_recovery(trace)
+        assert result.score == 1.0
+        assert result.details["recovered"] == 2
+        assert result.details["unrecovered"] == 0
+
+    def test_no_recovery(self):
+        trace = AgentTrace(
+            trace_id="r4",
+            steps=[
+                TraceStep(type="tool_call", name="t1"),
+                TraceStep(type="error", name="fail1"),
+                TraceStep(type="error", name="fail2"),
+                TraceStep(type="error", name="fail3"),
+            ],
+        )
+        result = error_recovery(trace)
+        assert result.score == 0.0
+        assert result.passed is False
+        assert result.details["total_errors"] == 3
+        assert result.details["recovered"] == 0
+
+    def test_partial_recovery(self):
+        trace = AgentTrace(
+            trace_id="r5",
+            steps=[
+                TraceStep(type="error", name="fail1"),
+                TraceStep(type="tool_call", name="fix1"),
+                TraceStep(type="error", name="fail2"),
+                TraceStep(type="error", name="fail3"),
+            ],
+        )
+        result = error_recovery(trace)
+        assert result.details["total_errors"] == 3
+        assert result.details["recovered"] == 1
+        assert result.score == pytest.approx(1 / 3, abs=0.01)
+        assert result.passed is False
+
+    def test_recovery_within_window(self):
+        trace = AgentTrace(
+            trace_id="r6",
+            steps=[
+                TraceStep(type="error", name="fail"),
+                TraceStep(type="error", name="still_failing"),
+                TraceStep(type="error", name="still_failing2"),
+                TraceStep(type="tool_call", name="recovered"),
+            ],
+        )
+        result = error_recovery(trace, recovery_window=3)
+        assert result.details["total_errors"] == 3
+        assert result.details["recovered"] == 3
+
+    def test_recovery_outside_window(self):
+        trace = AgentTrace(
+            trace_id="r7",
+            steps=[
+                TraceStep(type="error", name="fail"),
+                TraceStep(type="error", name="e2"),
+                TraceStep(type="error", name="e3"),
+                TraceStep(type="error", name="e4"),
+                TraceStep(type="tool_call", name="too_late"),
+            ],
+        )
+        result = error_recovery(trace, recovery_window=2)
+        first_error_recovered = result.details["recovered"]
+        assert first_error_recovered < result.details["total_errors"]
+
+    def test_custom_window_size(self):
+        trace = AgentTrace(
+            trace_id="r8",
+            steps=[
+                TraceStep(type="error", name="fail"),
+                TraceStep(type="error", name="e2"),
+                TraceStep(type="error", name="e3"),
+                TraceStep(type="error", name="e4"),
+                TraceStep(type="error", name="e5"),
+                TraceStep(type="tool_call", name="fix"),
+            ],
+        )
+        narrow = error_recovery(trace, recovery_window=1)
+        wide = error_recovery(trace, recovery_window=5)
+        assert wide.details["recovered"] >= narrow.details["recovered"]
+
+    def test_error_at_end_of_trace(self):
+        trace = AgentTrace(
+            trace_id="r9",
+            steps=[
+                TraceStep(type="tool_call", name="t1"),
+                TraceStep(type="error", name="final_error"),
+            ],
+        )
+        result = error_recovery(trace)
+        assert result.details["total_errors"] == 1
+        assert result.details["recovered"] == 0
+        assert result.score == 0.0
+
+    def test_evaluate_includes_error_recovery(self):
+        trace = AgentTrace(
+            trace_id="r10",
+            steps=[
+                TraceStep(type="tool_call", name="t1"),
+                TraceStep(type="error", name="fail"),
+                TraceStep(type="tool_call", name="fix"),
+            ],
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        report = evaluate(trace)
+        metric_names = {m.name for m in report.metrics}
+        assert "error_recovery" in metric_names
+        recovery_m = next(m for m in report.metrics if m.name == "error_recovery")
+        assert recovery_m.score == 1.0
+
+    def test_evaluate_threshold_applies_to_error_recovery(self):
+        trace = AgentTrace(
+            trace_id="r11",
+            steps=[
+                TraceStep(type="error", name="fail1"),
+                TraceStep(type="tool_call", name="fix1"),
+                TraceStep(type="error", name="fail2"),
+                TraceStep(type="error", name="fail3"),
+                TraceStep(type="error", name="fail4"),
+            ],
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        low = MetricConfig(pass_threshold=0.2)
+        high = MetricConfig(pass_threshold=0.9)
+        low_report = evaluate(trace, low)
+        high_report = evaluate(trace, high)
+        low_m = next(m for m in low_report.metrics if m.name == "error_recovery")
+        high_m = next(m for m in high_report.metrics if m.name == "error_recovery")
+        assert low_m.passed is True
+        assert high_m.passed is False

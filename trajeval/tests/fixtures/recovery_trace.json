@@ -1,0 +1,53 @@
+{
+  "trace_id": "recovery-trace-001",
+  "agent_name": "recovery-agent",
+  "task": "Process and upload files",
+  "steps": [
+    {
+      "type": "tool_call",
+      "name": "read_file",
+      "input": {"path": "data.csv"},
+      "output": {"content": "col1,col2\n1,2"},
+      "duration_ms": 50.0
+    },
+    {
+      "type": "error",
+      "name": "parse_error",
+      "input": {"action": "parse_csv"},
+      "output": {"error": "Unexpected format in row 3"},
+      "duration_ms": 10.0
+    },
+    {
+      "type": "llm_call",
+      "name": "claude-sonnet-4-6",
+      "input": {"prompt": "The CSV had a parse error, let me try a different approach"},
+      "output": {"response": "I'll use a lenient parser."},
+      "duration_ms": 300.0,
+      "tokens": {"prompt": 100, "completion": 50, "total": 150}
+    },
+    {
+      "type": "tool_call",
+      "name": "parse_csv_lenient",
+      "input": {"path": "data.csv", "mode": "lenient"},
+      "output": {"rows": 100},
+      "duration_ms": 80.0
+    },
+    {
+      "type": "error",
+      "name": "upload_timeout",
+      "input": {"action": "upload", "dest": "s3://bucket/data"},
+      "output": {"error": "Connection timed out"},
+      "duration_ms": 5000.0
+    },
+    {
+      "type": "error",
+      "name": "upload_timeout",
+      "input": {"action": "upload", "dest": "s3://bucket/data"},
+      "output": {"error": "Connection timed out again"},
+      "duration_ms": 5000.0
+    }
+  ],
+  "final_output": "Parsed CSV successfully but upload failed.",
+  "total_duration_ms": 10440.0,
+  "metadata": {"partial_success": true}
+}

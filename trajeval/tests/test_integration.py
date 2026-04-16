@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from trajeval.calibration import (
@@ -91,11 +92,11 @@ class TestFullEvalPipeline:
         report = evaluate(trace)
         assert isinstance(report, EvalReport)
         assert report.trace_id == "integration-test-001"
-        assert len(report.metrics) == 4
+        assert len(report.metrics) == 5
         assert 0.0 <= report.overall_score <= 1.0
 
         metric_names = {m.name for m in report.metrics}
-        assert metric_names == {"step_efficiency", "tool_accuracy", "loop_detection", "token_efficiency"}
+        assert metric_names == {"step_efficiency", "tool_accuracy", "loop_detection", "token_efficiency", "error_recovery"}
 
     def test_ingest_and_evaluate_from_file(self):
         trace = ingest_json(FIXTURES_DIR / "simple_trace.json")
@@ -529,7 +530,7 @@ class TestBoundaryScenarios:
 
         report = evaluate(trace)
         assert report.overall_score > 0
-        assert len(report.metrics) == 4
+        assert len(report.metrics) == 5
 
     def test_all_error_steps_eval(self):
         trace = ingest_json(self.ALL_ERRORS_TRACE)
@@ -569,7 +570,7 @@ class TestBoundaryScenarios:
 
         assert elapsed < 1.0
         assert trace.step_count == 60
-        assert len(report.metrics) == 4
+        assert len(report.metrics) == 5
         assert 0.0 <= report.overall_score <= 1.0
 
     def test_large_trace_judge_prompt_building(self):
@@ -629,3 +630,54 @@ class TestBoundaryScenarios:
         data = json.loads(r.output)
         assert data["overall_score"] == 1.0
         assert data["passed"] is True
+
+
+class TestErrorRecoveryIntegration:
+    """Integration tests for the error_recovery metric using fixture files."""
+
+    def test_recovery_trace_fixture(self):
+        trace = ingest_json(FIXTURES_DIR / "recovery_trace.json")
+        report = evaluate(trace)
+        recovery = next(m for m in report.metrics if m.name == "error_recovery")
+        assert recovery.details["total_errors"] == 3
+        assert recovery.details["recovered"] == 1
+        assert recovery.score == pytest.approx(1 / 3, abs=0.01)
+
+    def test_error_trace_has_recovery(self):
+        trace = ingest_json(FIXTURES_DIR / "error_trace.json")
+        report = evaluate(trace)
+        recovery = next(m for m in report.metrics if m.name == "error_recovery")
+        assert recovery.details["total_errors"] == 1
+        assert recovery.details["recovered"] == 1
+        assert recovery.score == 1.0
+
+    def test_simple_trace_no_errors(self):
+        trace = ingest_json(FIXTURES_DIR / "simple_trace.json")
+        report = evaluate(trace)
+        recovery = next(m for m in report.metrics if m.name == "error_recovery")
+        assert recovery.score == 1.0
+        assert recovery.details["total_errors"] == 0
+
+    def test_recovery_trace_cli_json(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "recovery_trace.json"),
+            "--format", "json", "--threshold", "0.0",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        metric_names = [m["name"] for m in data["metrics"]]
+        assert "error_recovery" in metric_names
+        recovery = next(m for m in data["metrics"] if m["name"] == "error_recovery")
+        assert recovery["details"]["total_errors"] == 3
+
+    def test_recovery_trace_compare(self):
+        good = str(FIXTURES_DIR / "simple_trace.json")
+        bad = str(FIXTURES_DIR / "recovery_trace.json")
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", good, bad, "--format", "json", "--tolerance", "0.01",
+        ])
+        data = json.loads(result.output)
+        delta_names = [d["name"] for d in data["metric_deltas"]]
+        assert "error_recovery" in delta_names
