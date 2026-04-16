@@ -15,6 +15,7 @@ from .calibration import AnnotationStore, HumanAnnotation, load_judge_results, c
 from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
+from .ci_output import format_compare_ci, format_eval_ci
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, ensemble_judge, judge
 
 console = Console()
@@ -28,7 +29,7 @@ def main():
 
 @main.command()
 @click.argument("trace_file", type=click.Path(exists=True, path_type=Path))
-@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+@click.option("--format", "fmt", type=click.Choice(["table", "json", "ci"]), default="table")
 @click.option("--expected-steps", type=int, default=None, help="Baseline step count for efficiency")
 @click.option(
     "--baseline-tokens", type=int, default=None, help="Baseline token count for efficiency"
@@ -82,6 +83,8 @@ def eval(
             "metrics": [m.model_dump() for m in report.metrics],
         }
         click.echo(json.dumps(result, indent=2))
+    elif fmt == "ci":
+        click.echo(format_eval_ci(report, threshold=threshold))
     else:
         _print_report(trace, report, show_details=details)
 
@@ -130,6 +133,8 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
         ensemble_config = EnsembleConfig(num_judges=judges, aggregation=aggregation)
         result = ensemble_judge(trace, config=config, ensemble_config=ensemble_config)
     else:
+        if aggregation != "median":
+            console.print(f"[yellow]Warning:[/yellow] --aggregation {aggregation} is ignored with a single judge")
         result = judge(trace, config=config)
 
     if result.error:
@@ -168,7 +173,7 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
 @click.argument("baseline_file", type=click.Path(exists=True, path_type=Path))
 @click.argument("current_file", type=click.Path(exists=True, path_type=Path))
 @click.option(
-    "--format", "fmt", type=click.Choice(["table", "json", "markdown"]), default="table"
+    "--format", "fmt", type=click.Choice(["table", "json", "markdown", "ci"]), default="table"
 )
 @click.option(
     "--tolerance",
@@ -239,6 +244,8 @@ def compare(
         click.echo(json.dumps(output, indent=2))
     elif fmt == "markdown":
         click.echo(format_markdown(result))
+    elif fmt == "ci":
+        click.echo(format_compare_ci(result))
     else:
         _print_comparison(result, show_details=details)
 
