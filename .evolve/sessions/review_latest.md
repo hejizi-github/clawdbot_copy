@@ -3,29 +3,28 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 精确对应 proposal Session 3 计划，LLM-as-judge 是 trajeval 相对纯规则工具的核心差异化能力，直接推进项目最关键价值主张
-- 完成度 (25%): 9/10 — 计划中四项交付物全部完成（结构化 rubric prompt、SDK 集成含 prompt caching、JSON 输出、mock 测试），23 个新测试覆盖 prompt 构建/解析/归一化/judge 函数/错误处理/缺包场景
-- 准确性 (20%): 8/10 — 代码逻辑正确，70 测试全绿，ruff 零警告；code fence 剥离逻辑略脆弱（按行首 ``` 过滤，若 JSON 内容恰好有此前缀会误删），实际风险极低
-- 一致性 (15%): 9/10 — 与 project-proposal.md 架构图、数据模型、依赖选型完全吻合；CLI 模式与已有 `eval` 命令保持一致；pyproject.toml 的 `[judge]` optional dep 已就绪
-- 副作用 (10%): 9/10 — 变更干净隔离：2 个新文件 + cli.py 仅增加 1 行 import 和 1 个 subcommand；47 个既有测试无回归
+- 方向正确性 (30%): 9/10 — `compare` 命令是 proposal Session 4 的核心任务，也是上次 review 标记的 Priority 1，直接补全了 CI 回归检测能力。
+- 完成度 (25%): 7/10 — 核心 compare 模块、judge --threshold、scorer 修复均完成；但计划中明确提到的 "Test CLI exit codes" 未交付（无 CLI 集成测试），且缺少 baseline/current 指标不对齐时的边界测试。
+- 准确性 (20%): 9/10 — tolerance 边界行为正确且有测试覆盖；regex 代替逐行剥离 code fence 更健壮；`default_factory` 修复了真实的 mutable default bug。
+- 一致性 (15%): 8/10 — 与 proposal 架构图完全吻合，CLI 风格与 eval/judge 一致；但 `judge --threshold` 默认 0.6 而 `eval`/`compare` 默认 0.7，存在轻微不一致。
+- 副作用 (10%): 8/10 — `_print_judge_report` 签名变更有默认值保护；`judge` 命令新增 exit code 行为是 breaking change（之前无条件 exit 0），但属于有意设计且与 `eval` 对齐。
 
-**加权总分**: 9/10
+**加权总分**: 8/10
 
 **做得好的地方**:
-- **依赖注入设计** — `judge(trace, config, client=None)` 让测试可以完全 mock，同时允许用户传入自定义 client（自定义 base_url/timeout），这是成熟的 SDK 集成模式
-- **Prompt caching** — system prompt 使用 `cache_control: {"type": "ephemeral"}`，批量评估同类 trace 时可复用 rubric 缓存，符合 Anthropic 最佳实践
-- **优雅降级** — `anthropic` 未安装时返回带 error 的 JudgeResult 而非崩溃，配合 `pip install trajeval[judge]` 的可选依赖设计，对用户友好
-- **测试质量** — 23 个测试组织清晰（6 prompt + 5 parse + 5 normalize + 7 judge），覆盖了 score clamping、code fence 剥离、API 失败、包缺失等边界场景
-- **I/O 截断** — 200 字符截断防止大 trace 导致 prompt 爆炸，是实用的防御性设计
-- **CLI 一致性** — `judge` 命令的 table/json 输出格式、错误处理模式与 `eval` 命令保持镜像对称
+- compare 模块设计清晰：Pydantic models (`MetricDelta`, `ComparisonResult`) 结构化好，`_classify_direction` 单独提取且充分测试
+- 19 个新测试覆盖了核心逻辑：tolerance 边界、混合方向、identical reports、metric 顺序保持等
+- 三种输出格式（table/json/markdown）满足不同场景——markdown 格式可直接贴 PR comment
+- 同时修复了上次 review 提出的 scorer.py 问题（mutable default + code fence regex），说明 review 反馈被认真消化
+- 全部 89 个测试通过，ruff 零警告
 
 **需要改进的地方**:
-- **Code fence 剥离可更健壮** — `_parse_response` 中 `if text.startswith("```")` 按行首匹配过滤，如果 LLM 返回 `````json\n{...}\n````` 这种嵌套 fence 会出问题。建议改用正则 `re.sub(r'^```\w*\n|\n```$', '', text.strip())` 或只剥离首尾两行
-- **`JudgeConfig.dimensions` 的 mutable default** — `Field(default=["task_completion", "reasoning_quality"])` 虽然 Pydantic v2 会正确复制，但用 `default_factory` 更符合 Python 惯例，避免未来维护者误解
-- **`judge_cmd` 缺少 exit code 语义** — `eval` 命令用 `sys.exit(0 if report.passed else 1)` 表达 CI pass/fail，但 `judge` 命令成功时没有 exit code（隐式 0）。考虑加入 `--threshold` 选项，当 overall_score < threshold 时 exit 1，这样 CI 中可以用 judge 做质量门
-- **Proposal 中提到的 5 个维度只实现了 2 个** — task_completion 和 reasoning_quality 已实现，tool_use_appropriateness / information_synthesis / harm_avoidance 未实现。这在 Session 3 scope 中是合理的，但 `DIMENSION_PROMPTS` dict 应在后续 session 补全
+- **CLI 集成测试缺失**：计划明确提到 "Test CLI exit codes" 但未交付。应使用 Click 的 `CliRunner` 测试 `compare` 命令的 exit code（regression → 1, no regression → 0），以及 `judge --threshold` 的 exit code 行为。这是 CI 集成的关键路径，仅靠单元测试不够。
+- **指标不对齐的边界情况未测试**：compare.py L50-52 处理了 baseline 有而 current 无（或反过来）的指标，用 0.0 填充——但没有测试覆盖这个分支。应添加一个 baseline 和 current 指标集合不同的测试用例。
+- **`has_regression` 仅看单指标、不看 overall_delta**：若所有指标各降 4.9%（tolerance 5%），每个单独不触发回归，但整体可能降了 4.9%。这是个设计取舍，建议在文档或 docstring 中说明行为，或考虑增加 `--overall-tolerance` 参数。
+- **threshold 默认值不一致**：`judge --threshold` 默认 0.6，`eval --threshold` 和 `compare --threshold` 默认 0.7。如果有意为之（judge 评分体系不同），应在 help text 中说明理由；否则应统一。
 
 **下次 session 的建议**:
-- **优先级 1**: 按 proposal 推进 Session 4 — `trajeval compare <baseline> <current>` 回归检测，这是让工具在 CI 中真正有用的关键功能
-- **优先级 2**: 给 `judge` 命令加 `--threshold` 选项（小改动，但大幅提升 CI 可用性）
-- **可选**: 补充 3 个 judge dimension（tool_use_appropriateness, information_synthesis, harm_avoidance）的 prompt 定义到 `DIMENSION_PROMPTS`，纯配置变更无需改架构
+- **优先级 1**：补 CLI 集成测试（用 CliRunner 测 compare/judge 的 exit code），这是 CI 管道的最后一环验证
+- **优先级 2**：按 proposal Session 5 推进 calibration 模块或扩充 judge dimensions，但建议先用一小部分时间补测试债
+- **优先级 3**：考虑添加 `compare` 对预计算 eval report JSON 的支持（而非每次重新 evaluate），适合大规模 CI 场景下缓存 baseline 结果
