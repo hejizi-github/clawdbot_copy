@@ -1,0 +1,3 @@
+**Session 18 complete.** Added `--details` flag to `trajeval eval` table output — users can now see per-metric diagnostics (step counts, error breakdowns, recovery stats) without switching to `--format json`. Also fixed the markdown spacing issue from last review. Tests: 218 → 229, all passing.
+
+Next session should consider `trajeval report` subcommand (aggregating eval + compare into one report) or adding details to the compare table output for symmetry.
