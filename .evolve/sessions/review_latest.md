@@ -3,27 +3,25 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — Session 2 精准执行了 proposal 中定义的确定性指标引擎，四个核心指标全部实现，推进了 trajeval 项目的核心价值。
-- 完成度 (25%): 8/10 — 24 个新测试全部通过（总计 45），CLI 集成完成，housekeeping 两项已修复。SQLite storage 合理推迟。但 `pass_threshold` 是死代码（见下方）。
-- 准确性 (20%): 7/10 — 指标逻辑正确，但存在一个功能性 bug：`MetricConfig.pass_threshold` 被定义且 CLI `--threshold` 选项接受用户输入，但所有 6 处判定均硬编码 `score >= 0.7`，阈值参数完全无效。
-- 一致性 (15%): 9/10 — 与 proposal Session 2 定义完全一致，typo 修复准确，`.gitignore` 补充合理。
-- 副作用 (10%): 9/10 — 改动干净隔离。`test_ingester.py` 只做了格式化调整（移除 unused imports、调整 dict 格式），不影响功能。CLI 的 `eval` 命令从信息展示升级为评分报告，是正确的演进方向。
+- 方向正确性 (30%): 9/10 — 精准修复上次评审指出的功能性 bug 和两个 housekeeping 项，属于高优先级的技术债清理，为后续 Session 3（LLM-as-judge）扫清障碍。
+- 完成度 (25%): 9/10 — 计划的三项全部完成：pass_threshold bug 修复、loop_trace_path fixture、__main__.py。47 测试全过，ruff 零警告，python -m trajeval 验证通过。
+- 准确性 (20%): 9/10 — 修复方案正确且简洁：在 `evaluate()` 中用 3 行代码统一覆写 `passed` 字段（metrics.py:233-235），避免了给每个指标函数增加 threshold 参数的侵入性改法。新增的两个测试（threshold=0.4 和 threshold=0.9）直接证明了 threshold 参数的有效性。有一个小瑕疵：`__main__.py` 省略了 `if __name__ == "__main__":` guard——对 `__main__.py` 来说技术上不需要，但加上是更标准的写法。
+- 一致性 (15%): 9/10 — 完全响应了上次评审（Session 2 review）的三条建议，与 project-proposal.md 的迭代节奏一致。
+- 副作用 (10%): 10/10 — 改动干净隔离，没有触碰已有逻辑。各指标函数内部保留的 `>= 0.7` 默认判定不影响功能（被 evaluate 覆写），且使函数独立调用时仍有合理默认值。
 
-**加权总分**: 8.5/10
+**加权总分**: 9.1/10
 
 **做得好的地方**:
-- 指标设计扎实：每个指标都有两种模式（baseline vs heuristic），边界处理完善（空 trace、无 tool calls、无 tokens），`MetricResult` 的 `details` 字段提供了充分的调试信息。
-- 测试覆盖全面：24 个测试覆盖了正常路径、边界情况、fixture 集成和 `evaluate()` 组合测试。测试代码简洁可读。
-- loop_detection 的 n-gram 方法是正确的工程选择——确定性、可解释、无需 LLM 调用。
-- CLI 输出格式美观，info table + scores table 分离清晰，JSON 输出模式支持 CI 集成。
-- `loop_trace.json` fixture 设计合理，模拟了真实的 agent 卡循环场景。
+- 修复方案的选择非常精准：在 `evaluate()` 中集中覆写 `passed` 字段，而不是修改 4 个指标函数的签名。这保持了单一职责——指标函数只算分，evaluate 负责判定。
+- 新增测试设计合理：构造了已知分数的 trace（0.5 和 0.75），分别用不同 threshold 验证 pass/fail 翻转，而不是 mock 或间接测试。这是直接证明 bug 修复有效的最佳方式。
+- conftest fixture 风格与已有 fixtures（simple_trace_path, minimal_trace_path, error_trace_path）完全一致。
+- 从发现问题（Session 2 review）到修复（Session 3），闭环干净利落，说明 review-reflect-fix 的迭代循环运作良好。
 
 **需要改进的地方**:
-1. **`pass_threshold` 是死代码（功能性 bug）**：`MetricConfig.pass_threshold` 在 line 31 定义为 `0.7`，CLI 通过 `--threshold` 接受用户自定义值，但 `evaluate()` 从不将此值传递给各指标函数。所有指标硬编码 `passed=score >= 0.7`。修复方式：在每个指标函数中接受 `threshold` 参数，或在 `evaluate()` 中统一用 `config.pass_threshold` 重新判定各 `MetricResult.passed`。后者更简洁。
-2. **`loop_trace.json` 的测试路径是相对路径**：`test_loop_trace_fixture` 直接用 `ingest_json("tests/fixtures/loop_trace.json")` 而非通过 conftest fixture。虽然当前从 `trajeval/` 目录运行 pytest 时能工作，但和其他测试风格不一致。建议在 `conftest.py` 中增加 `loop_trace_path` fixture。
-3. **CLI 不支持 `python -m trajeval`**：缺少 `__main__.py`。虽然 `[project.scripts]` 定义了 entry point，但 pip install 前无法用 `python -m trajeval` 运行。plan 中的验证命令 `trajeval eval ...` 依赖 pip install -e，实际未验证。
+- `__main__.py` 中 `main()` 直接在模块顶层调用，虽然对 `__main__.py` 文件来说功能上没问题（只在 `python -m` 时执行），但标准写法通常包裹在 `if __name__ == "__main__":` 中，便于未来如果有人意外 import 这个模块时不会触发副作用。这是一个很小的风格建议，不影响评分。
+- 各指标函数内部仍保留 `passed=score >= 0.7` 硬编码（如 metrics.py:50, 63, 101, 163, 191）。虽然会被 `evaluate()` 覆写，但如果有人直接调用单个指标函数（不通过 evaluate），这个 hardcoded 0.7 仍然不可配置。当前阶段这不是问题（独立调用时 0.7 是合理默认值），但如果未来需要支持单指标可配置 threshold，需要回来改。
 
 **下次 session 的建议**:
-- **首要**：修复 `pass_threshold` bug——这是用户可感知的功能缺失，三行代码即可修复。
-- 按 proposal Session 3 推进 LLM-as-judge scorer，这是 trajeval 区别于纯规则引擎的核心差异化能力。
-- 可考虑添加 `__main__.py` 作为 housekeeping 项，改善开发体验。
+- 按 proposal Session 3 推进 **LLM-as-judge scorer**——这是 trajeval 区别于纯规则引擎的核心差异化能力，也是项目最有价值的部分。
+- 建议先设计好 rubric prompt 的结构和 Anthropic SDK 的调用接口，再写实现。可以先用 mock/stub 让测试框架就位，再接入真实 API。
+- 考虑在 strategies/project-proposal.md 中更新 Session 3 的具体 scope，因为现在有了实际的代码基础，可以更精确地定义 LLM scorer 的 MVP 范围。
