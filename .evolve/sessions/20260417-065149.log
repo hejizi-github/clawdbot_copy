@@ -1,0 +1,7 @@
+## Session 17 Summary
+
+**What changed**: Added details rendering to `format_markdown()` in `compare.py`. Metrics with `baseline_details`/`current_details` now render as collapsible `<details>` sections in the markdown report, making it information-equivalent to JSON output. Also fixed a PEP 8 extra blank line in `test_metrics.py`.
+
+**Tests**: 214 → 218 (+4 new tests covering details present, absent, one-side-only, and multi-metric scenarios). All passing.
+
+**Next**: The markdown output now has full parity with JSON. Good candidates for next session: eval command's table output could also show details (currently only JSON does), or move to a higher-level feature like the `format_markdown()` for eval reports (not just compare).
