@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-071417 — LLM-as-judge 5 维度扩展 + 位置偏差缓解（Phase 3 Session 20）
+
+连续 8 个 9/10 确定性指标 session 后，本次正确转向了 LLM-as-judge 模块——这是上一轮反思明确建议的方向。将评估维度从 2 个（task_completion, reasoning_quality）扩展到 5 个（新增 tool_use_appropriateness, information_synthesis, harm_avoidance），并通过 randomize_order 实现维度顺序随机化以缓解位置偏差。12 个新测试（234→246）分两组：TestDimensionPrompts 验证 5 个维度的 prompt 内容，TestRandomization 覆盖顺序保持、随机性统计验证、输入不可变性。评审 8.6/10 PASS，从 9/10 降到 8.6 的原因是 `annotate` 命令的 `--dimensions` 默认值仍硬编码为旧的 2 维度，未与 `judge` 命令同步——这恰好又是"新功能未对齐已有命令的接口模式"这个反复出现的问题（Session 044129、061130 均为同源问题）。
+
+<!-- meta: verdict:PASS score:8.6 test_delta:+12 -->
+
+### 失败/回退分析
+
+无测试失败或回滚，计划清单 10 项全部打勾。但有两个值得正视的问题：
+
+1. **`annotate` 命令维度默认值未同步** — `judge` 命令通过 `ALL_DIMENSIONS` 常量同步了默认值，但 `annotate` 命令（cli.py:228）仍硬编码为 `"task_completion,reasoning_quality"`。这与 Session 044129（judge 缺 --threshold 与 eval 不对称）、Session 061130（recovery_window 未接入 MetricConfig）是完全同源的问题：**修改一个命令时没有扫描同一 CLI 中的所有姊妹命令**。三次犯同一类错误说明"对照已有命令"的经验虽然记录了（learnings.jsonl #6），但执行仍有盲区——Agent 对照了 `judge` 命令和 `scorer` 模块的一致性（做得好），却遗漏了 `annotate` 这个更远的调用点。
+
+2. **`test_judge_passes_randomize_to_prompt` 断言偏弱** — 只验证 API 被调用 1 次，未验证 `randomize_order=False` 真正传递到了 `build_user_prompt`。这与 Session 054645 的经验（"mock 注入后要断言 mock 确实被调用"）是同一逻辑的反面：不仅要验证 mock 被使用，还要验证参数被正确传递。
+
+### 下次不同做
+
+1. 修改 CLI 某个命令的默认值时，用 `grep` 搜索同一参数名在整个 cli.py 中的所有出现位置，确保所有命令同步——不能只对照"看起来最相关的"命令，要机械式全扫描
+2. 优先用 5 分钟修复 `annotate` 的维度默认值不一致问题（评审明确建议），然后推进 multi-judge ensemble 或 `--no-randomize` flag
+3. 测试参数传递时，不仅断言"被调用了"，还要断言"用正确的参数被调用"——mock 的 assert_called_with 或 capture 传入参数后逐字段验证
+
 ## Session 20260417-070605 — compare --details flag 完成 UX 对称性（Phase 3 Session 19）
 
 精准执行了 Session 18 反思中"下次不同做"的第 2 条建议：为 `trajeval compare` 添加 `--details` flag，与 `eval --details` 完全对称。核心设计复用了已有的 `_format_details_compact()` 纯函数，compare 表格在 details 模式下显示 "Baseline Details" 和 "Current Details" 两列，`--format json` 和 `--format markdown` 时 `--details` 被正确忽略（各自已有完整 details 渲染）。5 个新测试覆盖了 details 列显示/隐藏、指标信息可见、json/markdown 格式忽略，测试 229→234 全过，评审 9/10 PASS。这是连续第八个 9/10 session（Session 12 的 8/10 方向偏移后 Session 13-19 全部 9/10）。评审仅指出两个微小问题：plan checklist 中部分项未打勾、一个 `or` 断言略脆弱。值得注意的趋势：评审改进项从"功能缺失"→"一致性问题"→"格式打磨"→"远期设计考量"→现在的"计划文档完整度"——已经收敛到几乎无实质改进空间的状态，这进一步确认 trajeval 的确定性指标模块已达到完成态。
