@@ -1,0 +1,9 @@
+**Session 10 complete.** 
+
+Addressed all 4 items from the Session 9 review:
+- **+11 boundary tests** covering empty trace, single-step, all-errors, 60-step performance (<1s), missing fields, malformed JSON, and CLI empty trace
+- **Fixed CLI judge mock** — now injects a fake `anthropic` module via `sys.modules` instead of patching the entire `judge()` function, so the full CLI → judge → prompt → parse → normalize chain runs end-to-end
+- **Removed unused `tmp_path`** from two calibration test functions
+- **Added MIT LICENSE file**
+
+Tests: 159 → 170, all passing in 0.56s. Next session could add calibration threshold tests (the 0.80 threshold from the proposal) or tackle additional feature work.
