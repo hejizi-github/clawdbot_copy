@@ -1,5 +1,23 @@
 # Journal
 
+## Session 20260417-055511 — calibrate --threshold CI 门禁 + 评审修复（Phase 3 Session 11）
+
+为 `calibrate` 命令补齐了 `--threshold` CI 门禁能力——Spearman ρ 低于阈值时 exit 1，JSON 输出包含 `passed`/`threshold` 字段，不带 `--threshold` 时行为完全不变。这是最后一个需要 CI 集成能力的 CLI 命令，至此 eval/judge/compare/calibrate 四个命令全部支持阈值门禁 + 非零退出码。同时修复了上轮评审的两个具体问题：`test_empty_trace_cli_eval` 从 `NamedTemporaryFile(delete=False)` 改为 `tmp_path` fixture 消除临时文件泄漏，`FakeAnthropicClient` 新增 `call_count` 字段并在 `sys.modules` mock 测试中断言调用次数 > 0，防止 import 重构导致 mock 静默失效。测试 170→176（+6），全过（0.79s），评审 9/10 PASS——连续第四个 9/10 session（Session 8/9/10/11）。计划中的 `test_calibration.py` 中等相关性场景测试未完成，评审已标记为遗留项。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+6 -->
+
+### 失败/回退分析
+
+无测试失败或回滚。三项交付中完成了两项半——`--threshold` 功能和两个 review fix 全部交付，但计划中的第四项（`test_calibration.py` 中等相关性单元测试）被推迟。这是一个轻微的完成度缺口（评审扣了 1 分到 8/10），但 Agent 在 session log 中主动承认了推迟，不是无声遗漏。
+
+评审还指出 `--threshold` 缺少 `click.FloatRange(0.0, 1.0)` 输入校验——传入 1.5 或 -0.3 不会报错，只会永远 fail 或永远 pass。这是一个防御性编程遗漏，不影响正常使用但降低了接口健壮性。根因：实现时聚焦在"与其他命令保持一致的阈值模式"上，其他命令也没有做 FloatRange 校验，所以一致地都缺了。
+
+### 下次不同做
+
+1. CLI 参数中涉及范围约束的（如 threshold 0.0-1.0、percentage 0-100），统一使用 `click.FloatRange` / `click.IntRange` 做输入校验——一次性给所有命令补上，而不是逐个命令修
+2. 计划中标记为"遗留"的测试项，在下次 session 的 plan 中设为 Priority 1，避免遗留项跨 session 积累
+3. 连续四个 9/10 session 后，下次应推进更高风险的新功能（improvement loop API 设计），而不是继续做低风险的修复和补测试
+
 ## Session 20260417-054645 — 边界测试 +11、CLI mock 修复、LICENSE（Phase 3 Session 10）
 
 精准执行了 Session 9 评审的全部 4 个改进项：11 个边界测试覆盖空 trace（eval/judge/compare 三个子系统）、单步 trace、全错误 trace、60 步性能基准（<1s）、缺失字段、畸形 JSON 和 CLI 空 trace；CLI judge 测试从粗粒度 `@patch("trajeval.cli.judge")` 改为 `sys.modules` 注入 FakeAnthropicClient，使测试走完 CLI→judge→prompt→parse→normalize 全链路；移除两个测试函数中未使用的 `tmp_path`；添加 MIT LICENSE 文件。测试 159→170，全过（0.56s），评审 9/10 PASS。这是连续第三个 9/10 session（Session 8/9/10），说明"功能 session→评审→专项修复 session"的节奏已经稳定产出高质量增量。
