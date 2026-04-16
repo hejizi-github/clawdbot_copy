@@ -15,7 +15,7 @@ from .calibration import AnnotationStore, HumanAnnotation, load_judge_results, c
 from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
-from .scorer import ALL_DIMENSIONS, JudgeConfig, judge
+from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, ensemble_judge, judge
 
 console = Console()
 
@@ -100,7 +100,15 @@ def eval(
 @click.option(
     "--threshold", type=float, default=0.7, help="Pass/fail threshold (0.0-1.0, default 0.7)"
 )
-def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold: float):
+@click.option(
+    "--no-randomize", "no_randomize", is_flag=True, default=False,
+    help="Disable dimension order randomization (for reproducible evaluations)",
+)
+@click.option(
+    "--judges", type=int, default=1,
+    help="Number of judges for ensemble evaluation (default 1, use 3+ for high-stakes)",
+)
+def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold: float, no_randomize: bool, judges: int):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
         trace = ingest_json(trace_file)
@@ -111,8 +119,14 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
     config = JudgeConfig(
         model=model,
         dimensions=[d.strip() for d in dimensions.split(",")],
+        randomize_order=not no_randomize,
     )
-    result = judge(trace, config=config)
+
+    if judges > 1:
+        ensemble_config = EnsembleConfig(num_judges=judges)
+        result = ensemble_judge(trace, config=config, ensemble_config=ensemble_config)
+    else:
+        result = judge(trace, config=config)
 
     if result.error:
         console.print(f"[red]Judge error:[/red] {result.error}")
@@ -129,9 +143,19 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
             "model": result.model,
             "dimensions": [d.model_dump() for d in result.dimensions],
         }
+        if isinstance(result, EnsembleResult):
+            output["ensemble"] = {
+                "num_judges": result.num_judges,
+                "aggregation": result.aggregation,
+                "agreement": {d.name: round(d.std_dev, 4) for d in result.dimension_stats},
+                "individual_scores": [r.overall_score for r in result.individual_results],
+            }
         click.echo(json.dumps(output, indent=2))
     else:
-        _print_judge_report(trace, result, threshold=threshold, passed=passed)
+        if isinstance(result, EnsembleResult):
+            _print_ensemble_report(trace, result, threshold=threshold, passed=passed)
+        else:
+            _print_judge_report(trace, result, threshold=threshold, passed=passed)
 
     sys.exit(0 if passed else 1)
 
@@ -225,7 +249,7 @@ def compare(
 )
 @click.option(
     "--dimensions",
-    default="task_completion,reasoning_quality",
+    default=",".join(ALL_DIMENSIONS),
     help="Comma-separated dimensions to annotate",
 )
 @click.option("--annotator", default="default", help="Annotator identifier")
@@ -449,6 +473,52 @@ def _print_judge_report(trace, result, threshold: float = 0.7, passed: bool = Tr
         "[bold]Overall[/bold]",
         f"[{overall_color}]{overall_pct}[/{overall_color}]",
         f"{pass_label} (threshold: {threshold:.0%})",
+    )
+    console.print(scores)
+
+
+def _print_ensemble_report(trace, result, threshold: float = 0.7, passed: bool = True):
+    info = Table(title=f"Ensemble Judge: {trace.trace_id[:24]}", show_header=False)
+    info.add_column("Field", style="dim")
+    info.add_column("Value")
+    info.add_row("Agent", trace.agent_name)
+    info.add_row("Task", trace.task or "(none)")
+    info.add_row("Model", result.model)
+    info.add_row("Steps", str(trace.step_count))
+    info.add_row("Judges", str(result.num_judges))
+    info.add_row("Aggregation", result.aggregation)
+    console.print(info)
+    console.print()
+
+    scores = Table(title=f"Ensemble Scores ({result.num_judges} judges, {result.aggregation})")
+    scores.add_column("Dimension", style="cyan")
+    scores.add_column("Score", justify="right")
+    scores.add_column("Std Dev", justify="right")
+    scores.add_column("Explanation")
+
+    stat_map = {s.name: s for s in result.dimension_stats}
+    for d in result.dimensions:
+        score_color = "green" if d.score >= 4 else "yellow" if d.score >= 3 else "red"
+        stat = stat_map.get(d.name)
+        std_str = f"{stat.std_dev:.2f}" if stat else "-"
+        std_color = "green" if stat and stat.std_dev < 0.5 else "yellow" if stat and stat.std_dev < 1.0 else "red"
+        scores.add_row(
+            d.name,
+            f"[{score_color}]{d.score}/5[/{score_color}]",
+            f"[{std_color}]{std_str}[/{std_color}]",
+            d.explanation,
+        )
+
+    scores.add_section()
+    overall_pct = f"{result.overall_score:.0%}"
+    pass_label = "[green bold]PASS[/green bold]" if passed else "[red bold]FAIL[/red bold]"
+    overall_color = "green bold" if passed else "red bold"
+    individual = ", ".join(f"{r.overall_score:.0%}" for r in result.individual_results)
+    scores.add_row(
+        "[bold]Overall[/bold]",
+        f"[{overall_color}]{overall_pct}[/{overall_color}]",
+        "",
+        f"{pass_label} (threshold: {threshold:.0%}) | individual: {individual}",
     )
     console.print(scores)
 

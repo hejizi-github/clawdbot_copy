@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
+import statistics
 
 from pydantic import BaseModel, Field
 
@@ -219,3 +221,110 @@ def judge(trace: AgentTrace, config: JudgeConfig | None = None, client=None) -> 
             model=config.model,
             error=f"Judge API call failed: {e}",
         )
+
+
+class DimensionStat(BaseModel):
+    name: str
+    median_score: float
+    mean_score: float
+    std_dev: float
+    scores: list[int]
+
+
+class EnsembleConfig(BaseModel):
+    num_judges: int = Field(default=3, ge=2, le=10)
+    aggregation: str = Field(default="median")
+
+
+class EnsembleResult(BaseModel):
+    trace_id: str
+    dimensions: list[JudgeDimension] = Field(default_factory=list)
+    overall_score: float = Field(ge=0.0, le=1.0, default=0.0)
+    model: str = ""
+    error: str | None = None
+    num_judges: int = 0
+    aggregation: str = "median"
+    individual_results: list[JudgeResult] = Field(default_factory=list)
+    dimension_stats: list[DimensionStat] = Field(default_factory=list)
+
+
+def _aggregate_dimensions(results: list[JudgeResult], aggregation: str) -> tuple[list[JudgeDimension], list[DimensionStat]]:
+    """Aggregate dimension scores across multiple judge runs."""
+    dim_scores: dict[str, list[int]] = {}
+    dim_explanations: dict[str, list[str]] = {}
+
+    for r in results:
+        for d in r.dimensions:
+            dim_scores.setdefault(d.name, []).append(d.score)
+            dim_explanations.setdefault(d.name, []).append(d.explanation)
+
+    aggregated: list[JudgeDimension] = []
+    stats: list[DimensionStat] = []
+
+    for name, scores in dim_scores.items():
+        if aggregation == "median":
+            agg_score = int(statistics.median(scores))
+        else:
+            agg_score = round(statistics.mean(scores))
+
+        median_idx = len(scores) // 2
+        sorted_pairs = sorted(zip(scores, dim_explanations[name]), key=lambda x: x[0])
+        explanation = sorted_pairs[median_idx][1]
+
+        aggregated.append(JudgeDimension(
+            name=name,
+            score=agg_score,
+            explanation=explanation,
+        ))
+
+        mean_val = statistics.mean(scores)
+        std_val = statistics.stdev(scores) if len(scores) > 1 else 0.0
+
+        stats.append(DimensionStat(
+            name=name,
+            median_score=statistics.median(scores),
+            mean_score=round(mean_val, 2),
+            std_dev=round(std_val, 2),
+            scores=scores,
+        ))
+
+    return aggregated, stats
+
+
+def ensemble_judge(
+    trace: AgentTrace,
+    config: JudgeConfig | None = None,
+    ensemble_config: EnsembleConfig | None = None,
+    client=None,
+) -> EnsembleResult:
+    """Run multiple judge evaluations and aggregate results."""
+    if config is None:
+        config = JudgeConfig()
+    if ensemble_config is None:
+        ensemble_config = EnsembleConfig()
+
+    results: list[JudgeResult] = []
+    for _ in range(ensemble_config.num_judges):
+        r = judge(trace, config=config, client=client)
+        if r.error:
+            return EnsembleResult(
+                trace_id=trace.trace_id,
+                model=config.model,
+                error=f"Judge {len(results)+1}/{ensemble_config.num_judges} failed: {r.error}",
+                num_judges=ensemble_config.num_judges,
+                aggregation=ensemble_config.aggregation,
+            )
+        results.append(r)
+
+    aggregated_dims, dim_stats = _aggregate_dimensions(results, ensemble_config.aggregation)
+
+    return EnsembleResult(
+        trace_id=trace.trace_id,
+        dimensions=aggregated_dims,
+        overall_score=_normalize_score(aggregated_dims),
+        model=config.model,
+        num_judges=ensemble_config.num_judges,
+        aggregation=ensemble_config.aggregation,
+        individual_results=results,
+        dimension_stats=dim_stats,
+    )

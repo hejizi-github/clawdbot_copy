@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 from trajeval.calibration import HumanAnnotation
 from trajeval.cli import _format_details_compact, main
-from trajeval.scorer import JudgeDimension, JudgeResult
+from trajeval.scorer import ALL_DIMENSIONS, DimensionStat, EnsembleConfig, EnsembleResult, JudgeDimension, JudgeResult
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -263,6 +263,92 @@ class TestJudgeCommand:
         data = json.loads(result.output)
         assert data["passed"] is False
         assert result.exit_code == 1
+
+    @patch("trajeval.cli.judge")
+    def test_no_randomize_flag(self, mock_judge):
+        mock_judge.return_value = self._mock_judge_result("test-trace-001", 0.8)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"), "--no-randomize",
+        ])
+        assert result.exit_code == 0
+        call_kwargs = mock_judge.call_args
+        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config") or call_kwargs[0][1]
+        assert config.randomize_order is False
+
+    @patch("trajeval.cli.ensemble_judge")
+    def test_judges_flag_triggers_ensemble(self, mock_ensemble):
+        mock_ensemble.return_value = EnsembleResult(
+            trace_id="test-trace-001",
+            dimensions=[
+                JudgeDimension(name="task_completion", score=4, explanation="test"),
+            ],
+            overall_score=0.8,
+            model="test-model",
+            num_judges=3,
+            aggregation="median",
+            individual_results=[],
+            dimension_stats=[
+                DimensionStat(name="task_completion", median_score=4.0, mean_score=4.0, std_dev=0.5, scores=[3, 4, 5]),
+            ],
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"), "--judges", "3",
+        ])
+        assert result.exit_code == 0
+        assert mock_ensemble.call_count == 1
+        call_kwargs = mock_ensemble.call_args
+        ensemble_config = call_kwargs.kwargs.get("ensemble_config") or call_kwargs[1].get("ensemble_config")
+        assert ensemble_config.num_judges == 3
+
+    @patch("trajeval.cli.ensemble_judge")
+    def test_ensemble_json_format(self, mock_ensemble):
+        mock_ensemble.return_value = EnsembleResult(
+            trace_id="test-trace-001",
+            dimensions=[
+                JudgeDimension(name="task_completion", score=4, explanation="test"),
+            ],
+            overall_score=0.8,
+            model="test-model",
+            num_judges=3,
+            aggregation="median",
+            individual_results=[
+                JudgeResult(trace_id="t", overall_score=0.7, model="m"),
+                JudgeResult(trace_id="t", overall_score=0.8, model="m"),
+                JudgeResult(trace_id="t", overall_score=0.9, model="m"),
+            ],
+            dimension_stats=[
+                DimensionStat(name="task_completion", median_score=4.0, mean_score=4.0, std_dev=0.5, scores=[3, 4, 5]),
+            ],
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(FIXTURES_DIR / "simple_trace.json"),
+            "--judges", "3", "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "ensemble" in data
+        assert data["ensemble"]["num_judges"] == 3
+        assert data["ensemble"]["aggregation"] == "median"
+        assert len(data["ensemble"]["individual_scores"]) == 3
+        assert "agreement" in data["ensemble"]
+
+
+class TestAnnotateDefaultDimensions:
+    def test_annotate_defaults_to_all_dimensions(self, tmp_path):
+        out = tmp_path / "ann.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(FIXTURES_DIR / "simple_trace.json"),
+            "--output", str(out),
+        ], input="5\n4\n3\n4\n5\n")
+        assert result.exit_code == 0
+        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        assert len(lines) == 5
+        dims_saved = [json.loads(l)["dimension"] for l in lines]
+        assert set(dims_saved) == set(ALL_DIMENSIONS)
 
 
 class TestCompareCommand:

@@ -177,16 +177,22 @@ trajeval judge trace.json
 trajeval judge trace.json --model claude-sonnet-4-6
 trajeval judge trace.json --dimensions task_completion,reasoning_quality
 trajeval judge trace.json --format json --threshold 0.8
+trajeval judge trace.json --no-randomize
+trajeval judge trace.json --judges 3
 ```
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--model` | `claude-sonnet-4-6` | 用于打分的 Anthropic 模型 |
-| `--dimensions` | `task_completion,reasoning_quality` | 评估维度（逗号分隔） |
+| `--dimensions` | 全部 5 维度 | 评估维度（逗号分隔） |
 | `--format` | `table` | 输出格式：`table` 或 `json` |
 | `--threshold` | `0.7` | 通过/失败阈值（0.0-1.0） |
+| `--no-randomize` | `false` | 禁用维度顺序随机化（用于可复现评估） |
+| `--judges` | `1` | 裁判数量（>1 时启用 ensemble 模式，取中位数聚合） |
 
-内置维度：`task_completion`（任务完成度）、`reasoning_quality`（推理质量）。也可传入自定义维度名——裁判会使用通用评估 prompt。
+内置 5 维度：`task_completion`（任务完成度）、`reasoning_quality`（推理质量）、`tool_use_appropriateness`（工具使用合理性）、`information_synthesis`（信息整合）、`harm_avoidance`（安全规避）。也可传入自定义维度名——裁判会使用通用评估 prompt。
+
+**Ensemble 模式**：`--judges 3` 会运行 3 次独立评估，每个维度取中位数分数，并报告评分者间一致性（标准差）。JSON 输出包含 `ensemble` 字段，包括各裁判的独立分数和 agreement 指标。
 
 Exit code：总分 >= 阈值返回 `0`，否则返回 `1`。
 
@@ -227,7 +233,7 @@ trajeval annotate trace.json --dimensions task_completion,reasoning_quality --an
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--output` / `-o` | `annotations.jsonl` | 标注输出文件（JSONL 格式） |
-| `--dimensions` | `task_completion,reasoning_quality` | 标注维度 |
+| `--dimensions` | 全部 5 维度 | 标注维度 |
 | `--annotator` | `default` | 标注者标识 |
 
 运行后会展示轨迹摘要，然后逐个维度提示输入 0-5 的整数评分。

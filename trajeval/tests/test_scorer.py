@@ -9,12 +9,17 @@ from trajeval.models import AgentTrace, TokenUsage, TraceStep
 from trajeval.scorer import (
     ALL_DIMENSIONS,
     DIMENSION_PROMPTS,
+    DimensionStat,
+    EnsembleConfig,
+    EnsembleResult,
     JudgeConfig,
     JudgeDimension,
     JudgeResult,
+    _aggregate_dimensions,
     _normalize_score,
     _parse_response,
     build_user_prompt,
+    ensemble_judge,
     judge,
 )
 
@@ -338,3 +343,198 @@ class TestRandomization:
         config = JudgeConfig(randomize_order=False)
         judge(sample_trace, config=config, client=client)
         assert client.messages.create.call_count == 1
+
+
+class TestEnsembleConfig:
+    def test_defaults(self):
+        cfg = EnsembleConfig()
+        assert cfg.num_judges == 3
+        assert cfg.aggregation == "median"
+
+    def test_num_judges_min(self):
+        with pytest.raises(Exception):
+            EnsembleConfig(num_judges=1)
+
+    def test_num_judges_max(self):
+        with pytest.raises(Exception):
+            EnsembleConfig(num_judges=11)
+
+    def test_custom_values(self):
+        cfg = EnsembleConfig(num_judges=5, aggregation="mean")
+        assert cfg.num_judges == 5
+        assert cfg.aggregation == "mean"
+
+
+class TestAggregateDimensions:
+    def _make_results(self, score_sets):
+        results = []
+        for scores in score_sets:
+            dims = [
+                JudgeDimension(name=f"dim_{i}", score=s, explanation=f"Score {s}")
+                for i, s in enumerate(scores)
+            ]
+            results.append(JudgeResult(
+                trace_id="test",
+                dimensions=dims,
+                overall_score=0.5,
+                model="test-model",
+            ))
+        return results
+
+    def test_median_aggregation(self):
+        results = self._make_results([
+            [5, 3, 4],
+            [3, 5, 2],
+            [4, 4, 5],
+        ])
+        agg_dims, stats = _aggregate_dimensions(results, "median")
+        assert len(agg_dims) == 3
+        assert agg_dims[0].score == 4  # median of [5,3,4]
+        assert agg_dims[1].score == 4  # median of [3,5,4]
+        assert agg_dims[2].score == 4  # median of [4,2,5]
+
+    def test_mean_aggregation(self):
+        results = self._make_results([
+            [5, 3],
+            [3, 5],
+            [4, 4],
+        ])
+        agg_dims, stats = _aggregate_dimensions(results, "mean")
+        assert agg_dims[0].score == 4  # round(mean(5,3,4)) = round(4.0) = 4
+        assert agg_dims[1].score == 4  # round(mean(3,5,4)) = round(4.0) = 4
+
+    def test_stats_computed(self):
+        results = self._make_results([
+            [5, 2],
+            [3, 4],
+            [4, 3],
+        ])
+        _, stats = _aggregate_dimensions(results, "median")
+        assert len(stats) == 2
+        assert stats[0].name == "dim_0"
+        assert stats[0].scores == [5, 3, 4]
+        assert stats[0].median_score == 4.0
+        assert stats[0].std_dev == 1.0
+
+    def test_std_dev_zero_when_unanimous(self):
+        results = self._make_results([
+            [4, 4],
+            [4, 4],
+            [4, 4],
+        ])
+        _, stats = _aggregate_dimensions(results, "median")
+        assert stats[0].std_dev == 0.0
+        assert stats[1].std_dev == 0.0
+
+    def test_explanation_from_median(self):
+        results = []
+        for score, expl in [(2, "Low"), (4, "High"), (3, "Mid")]:
+            results.append(JudgeResult(
+                trace_id="test",
+                dimensions=[JudgeDimension(name="dim", score=score, explanation=expl)],
+                overall_score=0.5,
+                model="test-model",
+            ))
+        agg_dims, _ = _aggregate_dimensions(results, "median")
+        assert agg_dims[0].explanation == "Mid"
+
+
+class TestEnsembleJudge:
+    def _make_varied_client(self, responses):
+        client = MagicMock()
+        mock_returns = []
+        for resp_text in responses:
+            mock_content = MagicMock()
+            mock_content.text = resp_text
+            mock_response = MagicMock()
+            mock_response.content = [mock_content]
+            mock_returns.append(mock_response)
+        client.messages.create.side_effect = mock_returns
+        return client
+
+    def test_ensemble_runs_n_judges(self, sample_trace, mock_5dim_response):
+        client = self._make_varied_client([mock_5dim_response] * 3)
+        result = ensemble_judge(
+            sample_trace,
+            config=JudgeConfig(dimensions=ALL_DIMENSIONS),
+            ensemble_config=EnsembleConfig(num_judges=3),
+            client=client,
+        )
+        assert isinstance(result, EnsembleResult)
+        assert result.num_judges == 3
+        assert len(result.individual_results) == 3
+        assert client.messages.create.call_count == 3
+
+    def test_ensemble_aggregates_scores(self, sample_trace):
+        responses = []
+        for offset in [0, 1, -1]:
+            responses.append(json.dumps({
+                "dimensions": [
+                    {"name": "task_completion", "score": 4 + offset, "explanation": f"tc {offset}"},
+                    {"name": "reasoning_quality", "score": 3 + offset, "explanation": f"rq {offset}"},
+                ]
+            }))
+        client = self._make_varied_client(responses)
+        result = ensemble_judge(
+            sample_trace,
+            config=JudgeConfig(dimensions=["task_completion", "reasoning_quality"]),
+            ensemble_config=EnsembleConfig(num_judges=3),
+            client=client,
+        )
+        assert result.dimensions[0].score == 4  # median of [4,5,3]
+        assert result.dimensions[1].score == 3  # median of [3,4,2]
+
+    def test_ensemble_propagates_error(self, sample_trace):
+        client = MagicMock()
+        client.messages.create.side_effect = Exception("API down")
+        result = ensemble_judge(
+            sample_trace,
+            config=JudgeConfig(dimensions=["task_completion"]),
+            ensemble_config=EnsembleConfig(num_judges=3),
+            client=client,
+        )
+        assert result.error is not None
+        assert "1/3" in result.error
+
+    def test_ensemble_overall_score_from_aggregated(self, sample_trace, mock_5dim_response):
+        client = self._make_varied_client([mock_5dim_response] * 3)
+        result = ensemble_judge(
+            sample_trace,
+            config=JudgeConfig(dimensions=ALL_DIMENSIONS),
+            ensemble_config=EnsembleConfig(num_judges=3),
+            client=client,
+        )
+        expected = sum(d.score for d in result.dimensions) / (5 * len(result.dimensions))
+        assert result.overall_score == round(expected, 4)
+
+    def test_ensemble_dimension_stats(self, sample_trace):
+        responses = []
+        for tc_score in [3, 4, 5]:
+            responses.append(json.dumps({
+                "dimensions": [
+                    {"name": "task_completion", "score": tc_score, "explanation": f"s={tc_score}"},
+                ]
+            }))
+        client = self._make_varied_client(responses)
+        result = ensemble_judge(
+            sample_trace,
+            config=JudgeConfig(dimensions=["task_completion"]),
+            ensemble_config=EnsembleConfig(num_judges=3),
+            client=client,
+        )
+        assert len(result.dimension_stats) == 1
+        stat = result.dimension_stats[0]
+        assert stat.name == "task_completion"
+        assert stat.scores == [3, 4, 5]
+        assert stat.median_score == 4.0
+        assert stat.mean_score == 4.0
+        assert stat.std_dev == 1.0
+
+    def test_ensemble_result_has_judge_result_fields(self):
+        er = EnsembleResult(trace_id="t", overall_score=0.8, model="m")
+        assert er.dimensions == []
+        assert er.individual_results == []
+        assert er.trace_id == "t"
+        assert er.error is None
+        assert er.num_judges == 0
+        assert er.aggregation == "median"

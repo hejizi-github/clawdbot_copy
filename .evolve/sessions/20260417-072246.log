@@ -1,0 +1,41 @@
+# Session 20260417-072246 — Multi-judge ensemble + 快速修复（Phase 3 Session 21）
+
+## 做了什么
+
+### Quick Fix 1: annotate 命令维度默认值同步
+- `cli.py:228`: 将 `default="task_completion,reasoning_quality"` 改为 `default=",".join(ALL_DIMENSIONS)`
+- 与 `judge` 命令对齐，修复评审连续 3 个 session 指出的"姊妹命令不同步"问题
+
+### Quick Fix 2: judge 命令添加 --no-randomize flag
+- `cli.py:103-107`: 新增 `--no-randomize` flag，传递给 `JudgeConfig.randomize_order`
+- 支持可复现评估场景
+
+### Main Feature: Multi-judge ensemble
+- **scorer.py**: 新增 `EnsembleConfig`、`DimensionStat`、`EnsembleResult` 模型
+- **scorer.py**: 新增 `_aggregate_dimensions()` 聚合函数（支持 median/mean）和 `ensemble_judge()` 入口
+- **cli.py**: `judge` 命令新增 `--judges N` 参数，N>1 时自动走 ensemble 路径
+- **cli.py**: 新增 `_print_ensemble_report()` 表格输出，显示 std dev 一致性指标
+- **cli.py**: JSON 输出增加 `ensemble` 字段（num_judges, aggregation, agreement, individual_scores）
+
+### 测试
+- 246 → 265（+19 新测试）
+- `TestEnsembleConfig`: 4 tests — 默认值、边界值、自定义值
+- `TestAggregateDimensions`: 5 tests — median/mean 聚合、stats 计算、unanimous std=0、explanation 选择
+- `TestEnsembleJudge`: 6 tests — N 次调用、分数聚合、错误传播、overall_score 一致性、dimension_stats、字段验证
+- `TestJudgeCommand`: +3 tests — no_randomize flag、judges flag 触发 ensemble、ensemble JSON 格式
+- `TestAnnotateDefaultDimensions`: 1 test — annotate 默认使用全部 5 维度
+
+### README 更新
+- judge 命令文档更新：新增 --no-randomize、--judges 参数说明
+- 新增 Ensemble 模式说明段落
+- annotate 命令默认维度描述更新为"全部 5 维度"
+
+## 验证
+```
+265 passed in 0.75s
+```
+
+## Next Steps
+- 考虑加入 `--aggregation mean` CLI flag（当前默认 median）
+- 探索异步并行 ensemble 调用以减少延迟
+- 推进 calibration module（proposal 3.4）：人工标注 vs LLM 裁判的相关性分析
