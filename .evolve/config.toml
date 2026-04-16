@@ -1,0 +1,40 @@
+# Agent Lab — self-evolve 真实项目验证
+# 目标：学习 clawdbot + 调研前沿 Agent 技术 + 自主构建新项目
+
+[project]
+name = "agent-lab"
+description = "学习成熟 Agent 项目（clawdbot）的架构设计，调研 2025-2026 前沿 Agent 技术，自主决定并构建一个创新的 Agent 项目"
+
+[objective]
+goal = "Phase 1: 深入学习 clawdbot 源码架构，产出架构分析报告；Phase 2: 调研前沿 Agent 技术趋势，与 clawdbot 对比分析；Phase 3: 自主决定要构建什么，并迭代实现"
+
+[kpis]
+core = [
+    { name = "调研深度", direction = "up" },
+    { name = "代码产出", direction = "up" },
+    { name = "测试覆盖", direction = "up" },
+]
+guardrails = []
+
+[agent]
+backend = "claude"
+model = "claude-opus-4-6"
+max_budget_usd = 5.00
+reflect_budget_usd = 1.00
+timeout_seconds = 2400
+
+[tools]
+allowed = "Bash Read Write Edit Grep Glob WebSearch WebFetch"
+self_built = "tools"
+
+[verification]
+protected = [".evolve/config.toml", ".evolve/constitution/"]
+# 初始无测试，Agent 自己创建测试体系后可以加 verification commands
+# commands = ["npm test"]
+
+[review]
+enabled = true
+budget_usd = 1.00
+
+[notify]
+bark = "https://api.day.app/KGLs3JQaQfygX8BWrebViS"
