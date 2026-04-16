@@ -1,17 +1,18 @@
-# Project Proposal: AgentLens — Agent Evaluation & Quality System
+# Project Proposal: trajeval — Agent Trajectory Evaluation
 
 > Produced by agent-lab session 20260417-034008 (Phase 2: Proposal)
+> Updated: session 20260417-040642 (renamed from trajeval to trajeval — PyPI name "trajeval" was taken)
 > Based on: `clawdbot-architecture.md` (Phase 1) and `frontier-tech-research.md` (Phase 2)
 
 ---
 
 ## 1. What to Build
 
-**AgentLens** — a framework-agnostic agent evaluation system that ingests execution traces, scores them on trajectory and outcome metrics, and drives quality improvement loops.
+**trajeval** — a framework-agnostic agent evaluation system that ingests execution traces, scores them on trajectory and outcome metrics, and drives quality improvement loops.
 
 ### One-Line Pitch
 
-"OpenTelemetry-native agent evaluation: ingest traces from any framework, score with LLM-as-judge + deterministic metrics, output CI-ready quality reports."
+"Framework-agnostic agent trajectory evaluation: ingest traces, score with deterministic metrics + LLM-as-judge, output CI-ready quality reports."
 
 ---
 
@@ -53,8 +54,8 @@ Agent evaluation is the **highest-impact, highest-feasibility opportunity** iden
 ```
 ┌─────────────────────────────────────────────────┐
 │                    CLI / API                      │
-│  agentlens eval <trace>  |  agentlens report     │
-│  agentlens calibrate     |  agentlens compare    │
+│  trajeval eval <trace>  |  trajeval report     │
+│  trajeval calibrate     |  trajeval compare    │
 └──────────┬──────────────────┬────────────────────┘
            │                  │
 ┌──────────▼──────┐  ┌───────▼────────┐
@@ -89,24 +90,22 @@ Accepts agent execution traces in multiple formats:
 Normalizes all inputs into an internal `AgentTrace` representation:
 
 ```python
-@dataclass
-class TraceStep:
+class TraceStep(BaseModel):
     type: str          # "llm_call" | "tool_call" | "decision" | "error"
     name: str          # tool name, model name, or decision label
     input: dict
     output: dict
-    duration_ms: float
-    tokens: TokenUsage | None
+    duration_ms: float = 0.0
+    tokens: TokenUsage | None = None
     metadata: dict
 
-@dataclass
-class AgentTrace:
+class AgentTrace(BaseModel):
     trace_id: str
-    agent_name: str
-    task: str
+    agent_name: str = "unknown"
+    task: str = ""
     steps: list[TraceStep]
-    final_output: str
-    total_duration_ms: float
+    final_output: str = ""
+    total_duration_ms: float = 0.0
     total_tokens: TokenUsage
     metadata: dict     # framework, model, version, etc.
 ```
@@ -188,7 +187,7 @@ Multiple output formats:
 | `pydantic` | Data validation | Type-safe trace schemas |
 | `scipy` | Calibration statistics | Spearman correlation, distribution tests |
 
-No heavy frameworks. No LangChain dependency. No vector databases. Runs with `pip install agentlens`.
+No heavy frameworks. No LangChain dependency. No vector databases. Runs with `pip install trajeval`.
 
 ### Infrastructure: Zero
 
@@ -206,7 +205,7 @@ No heavy frameworks. No LangChain dependency. No vector databases. Runs with `pi
 - Define `AgentTrace` / `TraceStep` data models with Pydantic
 - Implement simple JSON trace ingester
 - Write 5+ unit tests for trace parsing
-- CLI skeleton: `agentlens eval <trace.json>`
+- CLI skeleton: `trajeval eval <trace.json>`
 
 ### Session 2: Deterministic metrics engine
 - Implement 4 core metrics: step efficiency, tool accuracy, loop detection, token efficiency
@@ -221,13 +220,13 @@ No heavy frameworks. No LangChain dependency. No vector databases. Runs with `pi
 - Mock-based tests (no real API calls in test suite)
 
 ### Session 4: Comparison + regression detection
-- `agentlens compare <baseline> <current>` command
+- `trajeval compare <baseline> <current>` command
 - Markdown report generation
 - Statistical significance testing for score differences
 - End-to-end test with sample traces
 
 ### Session 5: Calibration + polish
-- Human annotation CLI (`agentlens annotate <trace>`)
+- Human annotation CLI (`trajeval annotate <trace>`)
 - Correlation analysis between human and LLM scores
 - OTLP trace format support (OpenTelemetry ingestion)
 - README with usage examples
@@ -244,13 +243,13 @@ No heavy frameworks. No LangChain dependency. No vector databases. Runs with `pi
 
 ## 6. Connection to Clawdbot
 
-AgentLens is designed to be useful standalone, but has a clear integration path with Clawdbot:
+trajeval is designed to be useful standalone, but has a clear integration path with Clawdbot:
 
-1. **JSONL transcript ingestion**: Clawdbot stores all sessions as JSONL — AgentLens can ingest and evaluate these
+1. **JSONL transcript ingestion**: Clawdbot stores all sessions as JSONL — trajeval can ingest and evaluate these
 2. **Quality metrics for cron jobs**: Evaluate whether scheduled agent tasks are completing successfully
 3. **Dreaming quality**: Measure whether memory consolidation (light/deep/REM) actually improves agent performance
 4. **A/B testing**: Compare agent performance across model versions, prompt changes, or config tweaks
-5. **Three-agent harness pattern**: AgentLens could serve as the "Evaluator" in Anthropic's Planner→Generator→Evaluator architecture
+5. **Three-agent harness pattern**: trajeval could serve as the "Evaluator" in Anthropic's Planner→Generator→Evaluator architecture
 
 ---
 

@@ -1,0 +1,33 @@
+{
+  "trace_id": "test-trace-001",
+  "agent_name": "test-agent",
+  "task": "Summarize the quarterly report",
+  "steps": [
+    {
+      "type": "llm_call",
+      "name": "claude-sonnet-4-6",
+      "input": {"prompt": "Read the file quarterly_report.pdf"},
+      "output": {"response": "I'll read the file for you."},
+      "duration_ms": 450.0,
+      "tokens": {"prompt": 120, "completion": 30, "total": 150}
+    },
+    {
+      "type": "tool_call",
+      "name": "read_file",
+      "input": {"path": "quarterly_report.pdf"},
+      "output": {"content": "Revenue grew 15% YoY..."},
+      "duration_ms": 120.0
+    },
+    {
+      "type": "llm_call",
+      "name": "claude-sonnet-4-6",
+      "input": {"prompt": "Summarize this content..."},
+      "output": {"response": "Q4 revenue grew 15% year-over-year..."},
+      "duration_ms": 800.0,
+      "tokens": {"prompt": 500, "completion": 200, "total": 700}
+    }
+  ],
+  "final_output": "Q4 revenue grew 15% year-over-year, driven by strong SaaS adoption.",
+  "total_duration_ms": 1370.0,
+  "metadata": {"framework": "custom", "model_version": "claude-sonnet-4-6"}
+}

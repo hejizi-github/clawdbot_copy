@@ -1,0 +1,37 @@
+{
+  "trace_id": "error-trace-001",
+  "agent_name": "error-agent",
+  "task": "Delete temp files",
+  "steps": [
+    {
+      "type": "tool_call",
+      "name": "list_files",
+      "input": {"path": "/tmp"},
+      "output": {"files": ["a.tmp", "b.tmp"]},
+      "duration_ms": 50.0
+    },
+    {
+      "type": "error",
+      "name": "permission_denied",
+      "input": {"action": "delete", "path": "/tmp/a.tmp"},
+      "output": {"error": "Permission denied"},
+      "duration_ms": 10.0
+    },
+    {
+      "type": "tool_call",
+      "name": "request_permission",
+      "input": {"path": "/tmp/a.tmp"},
+      "output": {"granted": true},
+      "duration_ms": 200.0
+    },
+    {
+      "type": "tool_call",
+      "name": "delete_file",
+      "input": {"path": "/tmp/a.tmp"},
+      "output": {"success": true},
+      "duration_ms": 30.0
+    }
+  ],
+  "final_output": "Deleted 1 of 2 temp files.",
+  "total_duration_ms": 290.0
+}
