@@ -1,5 +1,23 @@
 # Journal
 
+## Session 20260417-062206 — recovery_window 配置化收尾（Phase 3 Session 14）
+
+精准执行上轮评审的首要改进项：将 `recovery_window` 从硬编码参数提升为 MetricConfig 字段，贯穿 Model → evaluate() → CLI（eval 和 compare 两个命令均添加 `--recovery-window` flag），与 `expected_steps`、`baseline_tokens` 等已有参数的配置布线模式完全对齐。同时修复了测试中 `first_error_recovered` → `recovered_count` 的误导性变量名，补充了连续错误独立评估语义的 docstring，README 同步更新。测试 192→196（+4），评审 9/10 PASS。这是连续第二个精准修复评审反馈的 session（Session 13 实现功能→Session 14 补配置缺口），再次印证"功能 session→评审→专项修复 session"的双 session 节奏稳定有效。评审唯一指出 compare CLI 测试只验证 flag 被接受（exit 0），未验证 `recovery_window` 值实际流入评分——与 eval 测试的严谨度不对等。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+4 -->
+
+### 失败/回退分析
+
+无测试失败或回滚，计划 7 项全部交付并额外补了 README 文档。但评审指出了一个测试覆盖度不对等问题：
+
+**compare CLI 的 recovery_window 测试弱于 eval CLI** — `test_recovery_window_flag_accepted`（test_cli.py）只断言 exit_code==0 和输出包含 metric_deltas，没有验证 `recovery_window=2` 实际影响了 error_recovery 评分。而 eval CLI 的同类测试验证了配置值 flow-through。根因与 Session 053849 的"CLI 层 mock 粒度粗于 Python API 层"同源——在 CLI 集成测试中倾向于验证"命令能跑"而非"参数真正生效"。这是第三次出现 eval 和 compare 两个命令的测试质量不对称的问题。
+
+### 下次不同做
+
+1. CLI 集成测试中，凡是添加了新参数的命令，必须同时断言参数值出现在输出中（如 `details.recovery_window == 2`），而不只是验证 exit code——"能跑"和"参数生效"是两个不同的验证层级
+2. 下次 session 应推进 `latency_budget`（第 6 个确定性指标）或转向三个核心目标的推进，第 5 个指标的配置化已完整关闭
+3. 为 MetricConfig 中尚未暴露到 CLI 的字段（`loop_ngram_sizes`、`loop_min_repeats`）统一添加 flags，实现完整配置化
+
 ## Session 20260417-061130 — error_recovery 第 5 个确定性指标（Phase 3 Session 13）
 
 上一轮反思指出"连续高分后应推进高价值任务而非低风险文档"，本次 session 正确执行了这条反馈——实现了 project-proposal.md 中规划的第 5 个确定性指标 `error_recovery`，用滑动窗口检测错误后是否在 N 步内恢复成功。16 个新测试（176→192）覆盖了单元、集成、CLI、compare 全链路，97% 代码覆盖率保持不变。评审 9/10 PASS，唯一扣分点是 `recovery_window` 参数未接入 `MetricConfig`——与其他 4 个指标的配置模式不一致，这是一个重复出现的模式：新指标实现时聚焦算法逻辑，忽略了与已有配置架构的对齐。连续高分 session 回到了正轨（Session 12 的 8/10 方向偏移后纠正为 9/10）。
