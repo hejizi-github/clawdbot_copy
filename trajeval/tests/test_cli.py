@@ -508,6 +508,44 @@ class TestImproveCommand:
             assert len(rec["suggestion"]) > 20, "Recommendations should be substantive"
             assert rec["title"], "Recommendations must have a title"
 
+    def test_judge_files_only(self, tmp_path):
+        jf = tmp_path / "judge1.json"
+        jf.write_text(JudgeResult(
+            trace_id="t1", overall_score=0.2, model="test",
+            dimensions=[JudgeDimension(name="task_completion", score=1)],
+        ).model_dump_json())
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve", str(FIXTURES_DIR / "eval_result_good.json"),
+            "--judge-files", str(jf),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "task_completion" in data["metric_summary"]
+        assert "step_efficiency" in data["metric_summary"]
+
+    def test_judge_files_merged_with_eval(self, tmp_path):
+        jf1 = tmp_path / "j1.json"
+        jf2 = tmp_path / "j2.json"
+        for i, (f, score) in enumerate([(jf1, 1), (jf2, 1)]):
+            f.write_text(JudgeResult(
+                trace_id=f"t{i}", overall_score=score / 5, model="test",
+                dimensions=[JudgeDimension(name="reasoning_quality", score=score)],
+            ).model_dump_json())
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve", str(FIXTURES_DIR / "eval_result_bad.json"),
+            "--judge-files", str(jf1), "--judge-files", str(jf2),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["num_evaluations"] >= 3
+        assert "reasoning_quality" in data["metric_summary"]
+        judge_findings = [f for f in data["findings"] if f["metric"] == "reasoning_quality"]
+        assert len(judge_findings) > 0
+
 
 class TestAnnotateDefaultDimensions:
     def test_annotate_defaults_to_all_dimensions(self, tmp_path):

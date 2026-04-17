@@ -16,8 +16,8 @@ from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
 from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
-from .improvement import Priority, analyze_results
-from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, ensemble_judge, judge
+from .improvement import ImprovementReport, Priority, analyze_judge_results, analyze_results
+from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
 
 console = Console()
 
@@ -370,7 +370,11 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str, threshold:
 @main.command()
 @click.argument("eval_files", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
-def improve(eval_files: tuple[Path, ...], fmt: str):
+@click.option(
+    "--judge-files", multiple=True, type=click.Path(exists=True, path_type=Path),
+    help="LLM judge result JSON files to include in analysis",
+)
+def improve(eval_files: tuple[Path, ...], fmt: str, judge_files: tuple[Path, ...]):
     """Analyze multiple evaluation results and suggest improvements."""
     from .metrics import EvalReport
 
@@ -382,16 +386,38 @@ def improve(eval_files: tuple[Path, ...], fmt: str):
         except Exception as e:
             console.print(f"[yellow]Warning: skipping {f.name}: {e}[/yellow]")
 
-    if not reports:
+    judge_results = []
+    for f in judge_files:
+        try:
+            data = json.loads(Path(f).read_text())
+            judge_results.append(JudgeResult(**data))
+        except Exception as e:
+            console.print(f"[yellow]Warning: skipping judge file {Path(f).name}: {e}[/yellow]")
+
+    if not reports and not judge_results:
         console.print("[red]No valid evaluation results found[/red]")
         sys.exit(1)
 
-    report = analyze_results(reports)
+    eval_report = analyze_results(reports) if reports else None
+    judge_report = analyze_judge_results(judge_results) if judge_results else None
+
+    if eval_report and judge_report:
+        merged = ImprovementReport(
+            num_evaluations=eval_report.num_evaluations + judge_report.num_evaluations,
+            findings=eval_report.findings + judge_report.findings,
+            recommendations=sorted(
+                eval_report.recommendations + judge_report.recommendations,
+                key=lambda r: (0 if r.priority == Priority.HIGH else 1 if r.priority == Priority.MEDIUM else 2),
+            ),
+            metric_summary={**eval_report.metric_summary, **judge_report.metric_summary},
+        )
+    else:
+        merged = eval_report or judge_report  # type: ignore[assignment]
 
     if fmt == "json":
-        click.echo(json.dumps(report.model_dump(), indent=2))
+        click.echo(json.dumps(merged.model_dump(), indent=2))
     else:
-        _print_improvement_report(report)
+        _print_improvement_report(merged)
 
 
 def _print_improvement_report(report):

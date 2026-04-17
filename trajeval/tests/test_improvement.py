@@ -5,9 +5,11 @@ from trajeval.improvement import (
     ImprovementReport,
     Priority,
     Recommendation,
+    analyze_judge_results,
     analyze_results,
 )
 from trajeval.metrics import EvalReport, MetricResult
+from trajeval.scorer import JudgeDimension, JudgeResult
 
 
 def _report(
@@ -313,3 +315,241 @@ class TestSpecificAdvice:
         report = analyze_results(reports)
         recs = [r for r in report.recommendations if "custom_metric_xyz" in r.title]
         assert len(recs) > 0
+
+
+def _judge_result(
+    trace_id: str,
+    dims: list[tuple[str, int]],
+    error: str | None = None,
+) -> JudgeResult:
+    return JudgeResult(
+        trace_id=trace_id,
+        dimensions=[JudgeDimension(name=n, score=s) for n, s in dims],
+        overall_score=sum(s for _, s in dims) / (5 * len(dims)) if dims else 0.0,
+        model="test-model",
+        error=error,
+    )
+
+
+class TestAnalyzeJudgeResultsEmpty:
+    def test_empty_list(self):
+        report = analyze_judge_results([])
+        assert report.num_evaluations == 0
+        assert report.findings == []
+        assert report.recommendations == []
+
+    def test_all_error_results_treated_as_empty(self):
+        results = [_judge_result("t1", [("task_completion", 3)], error="API failed")]
+        report = analyze_judge_results(results)
+        assert report.num_evaluations == 0
+
+    def test_single_passing_result(self):
+        results = [_judge_result("t1", [("task_completion", 4), ("reasoning_quality", 5)])]
+        report = analyze_judge_results(results)
+        assert report.num_evaluations == 1
+        assert len(report.findings) == 0
+        assert "task_completion" in report.metric_summary
+        assert "reasoning_quality" in report.metric_summary
+
+
+class TestJudgeConsistentFailure:
+    def test_high_fail_rate(self):
+        results = [
+            _judge_result(f"t{i}", [("task_completion", 1)])
+            for i in range(4)
+        ]
+        report = analyze_judge_results(results)
+        fail_findings = [f for f in report.findings if f.pattern == "consistently_failing"]
+        assert len(fail_findings) == 1
+        assert fail_findings[0].metric == "task_completion"
+        recs = [r for r in report.recommendations if r.priority == Priority.HIGH]
+        assert len(recs) >= 1
+
+    def test_medium_fail_rate(self):
+        results = [
+            _judge_result(f"t{i}", [("reasoning_quality", 2)])
+            for i in range(4)
+        ] + [
+            _judge_result(f"t{i}", [("reasoning_quality", 4)])
+            for i in range(4, 10)
+        ]
+        report = analyze_judge_results(results)
+        fail_findings = [f for f in report.findings if f.metric == "reasoning_quality" and f.pattern == "frequently_failing"]
+        assert len(fail_findings) == 1
+        assert fail_findings[0].severity == Priority.MEDIUM
+
+    def test_all_passing_no_findings(self):
+        results = [
+            _judge_result(f"t{i}", [("task_completion", 4)])
+            for i in range(5)
+        ]
+        report = analyze_judge_results(results)
+        fail_findings = [f for f in report.findings if f.pattern in ("consistently_failing", "frequently_failing")]
+        assert len(fail_findings) == 0
+
+
+class TestJudgeTrendDetection:
+    def test_declining_trend(self):
+        results = [
+            _judge_result("t1", [("task_completion", 5)]),
+            _judge_result("t2", [("task_completion", 5)]),
+            _judge_result("t3", [("task_completion", 4)]),
+            _judge_result("t4", [("task_completion", 2)]),
+            _judge_result("t5", [("task_completion", 2)]),
+            _judge_result("t6", [("task_completion", 1)]),
+        ]
+        report = analyze_judge_results(results)
+        declining = [f for f in report.findings if f.pattern == "declining"]
+        assert len(declining) == 1
+        assert declining[0].metric == "task_completion"
+
+    def test_no_trend_with_two_results(self):
+        results = [
+            _judge_result("t1", [("task_completion", 5)]),
+            _judge_result("t2", [("task_completion", 1)]),
+        ]
+        report = analyze_judge_results(results)
+        declining = [f for f in report.findings if f.pattern == "declining"]
+        assert len(declining) == 0
+
+    def test_improving_trend_not_flagged(self):
+        results = [
+            _judge_result("t1", [("reasoning_quality", 1)]),
+            _judge_result("t2", [("reasoning_quality", 2)]),
+            _judge_result("t3", [("reasoning_quality", 3)]),
+            _judge_result("t4", [("reasoning_quality", 4)]),
+            _judge_result("t5", [("reasoning_quality", 5)]),
+        ]
+        report = analyze_judge_results(results)
+        declining = [f for f in report.findings if f.pattern == "declining"]
+        assert len(declining) == 0
+
+
+class TestJudgeHighVariance:
+    def test_high_variance_flagged(self):
+        results = [
+            _judge_result("t1", [("task_completion", 1)]),
+            _judge_result("t2", [("task_completion", 5)]),
+            _judge_result("t3", [("task_completion", 1)]),
+            _judge_result("t4", [("task_completion", 5)]),
+        ]
+        report = analyze_judge_results(results)
+        variance = [f for f in report.findings if f.pattern == "high_variance"]
+        assert len(variance) == 1
+
+    def test_low_variance_not_flagged(self):
+        results = [
+            _judge_result(f"t{i}", [("task_completion", 4)])
+            for i in range(4)
+        ]
+        report = analyze_judge_results(results)
+        variance = [f for f in report.findings if f.pattern == "high_variance"]
+        assert len(variance) == 0
+
+
+class TestJudgeLowScoring:
+    def test_low_mean_without_high_fail_rate(self):
+        results = [
+            _judge_result("t1", [("information_synthesis", 2)]),
+            _judge_result("t2", [("information_synthesis", 3)]),
+            _judge_result("t3", [("information_synthesis", 3)]),
+            _judge_result("t4", [("information_synthesis", 3)]),
+            _judge_result("t5", [("information_synthesis", 3)]),
+        ]
+        report = analyze_judge_results(results)
+        low = [f for f in report.findings if f.pattern == "low_scoring"]
+        assert len(low) == 1
+        assert low[0].metric == "information_synthesis"
+
+
+class TestJudgeDimensionAdvice:
+    def test_task_completion_advice(self):
+        results = [
+            _judge_result(f"t{i}", [("task_completion", 1)])
+            for i in range(4)
+        ]
+        report = analyze_judge_results(results)
+        recs = [r for r in report.recommendations if "task_completion" in r.title]
+        assert len(recs) >= 1
+        assert "task" in recs[0].suggestion.lower()
+
+    def test_harm_avoidance_advice(self):
+        results = [
+            _judge_result(f"t{i}", [("harm_avoidance", 0)])
+            for i in range(4)
+        ]
+        report = analyze_judge_results(results)
+        recs = [r for r in report.recommendations if "harm_avoidance" in r.title]
+        assert len(recs) >= 1
+        assert "safe" in recs[0].suggestion.lower() or "unsafe" in recs[0].suggestion.lower()
+
+    def test_unknown_dimension_gets_generic_advice(self):
+        results = [
+            _judge_result(f"t{i}", [("custom_dim_xyz", 1)])
+            for i in range(4)
+        ]
+        report = analyze_judge_results(results)
+        recs = [r for r in report.recommendations if "custom_dim_xyz" in r.title]
+        assert len(recs) >= 1
+
+
+class TestJudgeMetricSummary:
+    def test_summary_fields(self):
+        results = [
+            _judge_result("t1", [("task_completion", 4)]),
+            _judge_result("t2", [("task_completion", 3)]),
+            _judge_result("t3", [("task_completion", 5)]),
+        ]
+        report = analyze_judge_results(results)
+        summary = report.metric_summary["task_completion"]
+        assert "mean_score" in summary
+        assert "fail_rate" in summary
+        assert "std_dev" in summary
+        assert "num_evaluations" in summary
+        assert "trend" in summary
+        assert summary["num_evaluations"] == 3
+
+    def test_mean_score_correct(self):
+        results = [
+            _judge_result("t1", [("task_completion", 2)]),
+            _judge_result("t2", [("task_completion", 4)]),
+        ]
+        report = analyze_judge_results(results)
+        assert report.metric_summary["task_completion"]["mean_score"] == 3.0
+
+    def test_fail_rate_with_custom_threshold(self):
+        results = [
+            _judge_result("t1", [("task_completion", 3)]),
+            _judge_result("t2", [("task_completion", 4)]),
+        ]
+        report_default = analyze_judge_results(results, pass_threshold=3)
+        assert report_default.metric_summary["task_completion"]["fail_rate"] == 0.0
+
+        report_strict = analyze_judge_results(results, pass_threshold=4)
+        assert report_strict.metric_summary["task_completion"]["fail_rate"] == 0.5
+
+
+class TestJudgeMultipleDimensions:
+    def test_independent_per_dimension(self):
+        results = [
+            _judge_result("t1", [("task_completion", 5), ("reasoning_quality", 1)]),
+            _judge_result("t2", [("task_completion", 4), ("reasoning_quality", 1)]),
+            _judge_result("t3", [("task_completion", 5), ("reasoning_quality", 2)]),
+        ]
+        report = analyze_judge_results(results)
+        tc_findings = [f for f in report.findings if f.metric == "task_completion"]
+        rq_findings = [f for f in report.findings if f.metric == "reasoning_quality"]
+        assert len(tc_findings) == 0
+        assert len(rq_findings) > 0
+
+
+class TestJudgeErrorFiltering:
+    def test_errors_filtered_out(self):
+        results = [
+            _judge_result("t1", [("task_completion", 5)]),
+            _judge_result("t2", [("task_completion", 4)]),
+            _judge_result("t3", [], error="API timeout"),
+        ]
+        report = analyze_judge_results(results)
+        assert report.num_evaluations == 2
+        assert report.metric_summary["task_completion"]["num_evaluations"] == 2
