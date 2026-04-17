@@ -1,0 +1,7 @@
+Review written. **Verdict: PASS (9/10)**
+
+Key findings:
+- Near-duplicate loop detection is well-implemented with clean backward compatibility (default threshold=1.0 preserves existing behavior)
+- All 328 tests pass, +12 new tests cover the right scenarios
+- One minor design concern: overlapping sliding windows can produce multiple clusters from what's really one loop pattern — not a bug (set-based penalty prevents double counting), but creates noisy output for users
+- Next priority: expose `--similarity-threshold` in the CLI to make the feature end-to-end usable

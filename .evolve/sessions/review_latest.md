@@ -3,26 +3,26 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 修复 loop detection 双重计算和 `passed` fail-open 默认值都是核心指标的正确性问题，直接提升 trajeval 的评估可靠性
-- 完成度 (25%): 9/10 — 两个修复均完整实现：n-gram 去重包含模式子序列检测 + 位置覆盖计算两层机制，`passed` auto-compute 逻辑与 CLI 一致；+7 测试覆盖了关键场景（子序列移除、独立保留、penalty 减少、单 n-gram、auto pass/fail/override）
-- 准确性 (20%): 9/10 — 数学验证正确：`A B A B A B` 修复后 repeated_positions = {2,3,4,5}（4 个），score = 1 - 4/6 ≈ 0.333，合理反映冗余；`_is_subpattern` 同长度互不覆盖的边界处理正确；`passed=None` auto-compute 使用 `result.overall_score >= threshold` 与 CLI 行为一致
-- 一致性 (15%): 9/10 — 与 project-proposal.md 中 loop detection "n-gram matching of repeated sequences" 的设计意图一致；与 frontier-tech-research.md 中 "step-level tracing is the solved half" 的评估哲学协调
-- 副作用 (10%): 9/10 — 316 测试全绿，0 回归；`_positions` 字段通过 `pop()` 在输出前清理，不泄露到外部 API；fixture 测试断言从 `bigrams` 改为 `patterns` 是因 dedup 使原断言不再稳定的合理调整
+- 方向正确性 (30%): 9/10 — 直接响应 Session 25 评审建议，near-duplicate loop detection 是 agent 轨迹评估的实质性能力提升
+- 完成度 (25%): 8/10 — 核心功能完整且向后兼容，+12 测试覆盖全面；CLI 尚未暴露 `--similarity-threshold` 参数（Agent 自己也已标注为 next step）
+- 准确性 (20%): 8/10 — 算法正确，hamming similarity + greedy clustering 思路合理；贪心聚类的代表元取决于滑动窗口顺序，但对确定性输入结果一致，不构成 bug
+- 一致性 (15%): 9/10 — 遵循既有模式（config 参数 → 函数参数 → evaluate 集成），默认 1.0 确保零行为变更，命名风格一致
+- 副作用 (10%): 10/10 — 全部 328 测试通过，默认行为无变化，改动干净隔离
 
 **加权总分**: 9/10
 
 **做得好的地方**:
-- 问题分析精准：准确识别了 n-gram 交叉大小导致的双重计算根因，并用具体数值（12 repeated steps / 6 total → capped 0.9）量化了问题严重性
-- 修复方案分层合理：先做模式去重（`_is_subpattern` 移除被长模式覆盖的短模式），再做位置覆盖（set union 消除位置级重复），两层互补
-- `passed` 默认值修复体现了 API 设计意识：从 fail-open (`True`) 到 fail-closed (`None` → auto-compute)，且保持了 CLI 显式传参路径不受影响
-- 测试设计覆盖了关键对立面：subsumed vs independent bigrams, auto-compute pass vs fail vs explicit override
+- 向后兼容设计出色：`loop_similarity_threshold=1.0` 默认值意味着所有既有行为完全不变，新功能是 opt-in
+- `_find_near_loops` 正确排除了 exact-only 单变体簇（`len(variants)==1 and rep in exact_patterns`），避免和 exact loop 重复计数
+- `repeated_positions` 用 set 管理，确保 exact 和 near-loop 的位置不会被双重惩罚
+- 测试设计覆盖了关键场景：threshold 开关、exact 不被重复报告、penalty 增加验证、config 端到端流通
+- Session 25 的 polish 建议（docstring 修正、why-comment）也一并处理了
 
 **需要改进的地方**:
-- `_is_subpattern` 的 docstring 写 "repeated" 有歧义，实际只检查单次连续子序列包含关系，建议改为 "Check if short is a contiguous subsequence of long"
-- 位置计算中 `positions[1:]` 跳过首次出现是正确的（首次不算浪费），但缺少注释解释这个 "为什么"，新读者可能会疑惑为什么不是 `positions[:]`
-- 可以考虑增加一个边界测试：当所有 n-gram 大小的 pattern 互相独立时（没有任何子序列关系），确认 penalty 是所有位置的正确并集而非简单累加
+- **滑动窗口重叠导致多簇报告**：对 `A B C, A B D, A B E` 序列，除了主簇 `[A,B,C]` (3 variants) 外，还会报告 `[B,C,A]` 和 `[C,A,B]` 作为额外 near-loop 簇。虽然 penalty 通过 set 不会双重计算，但用户看到 3 个独立的 near_loops_found 条目会困惑——它们本质上是同一个循环模式的不同窗口切片。建议后续对 near_loops_found 也做类似 `_deduplicate_loops` 的去重，或者至少在文档中说明这一行为
+- **聚类代表元选择不稳定**：同一组 variants 根据出现顺序会选不同的 representative 作为报告的 pattern。对功能无影响，但如果未来要做 pattern 比较或持久化报告，建议选择字典序最小的 variant 作为代表元
 
 **下次 session 的建议**:
-- 当前 loop detection 的 dedup 只处理"短模式是长模式的连续子序列"的情况。如果一个 2-gram `(A,B)` 反复出现但不被任何 3-gram 包含，它仍然可能和 3-gram 覆盖相同的位置——位置覆盖计算已经处理了这种情况，但可以加一个测试明确验证
-- 考虑为 `_deduplicate_loops` 和位置覆盖逻辑添加 property-based testing（hypothesis），用随机 trace 验证 `total_repeated_steps <= len(names)` 恒成立
-- 如果 Phase 3 继续优化指标，可以考虑 loop detection 的下一步：检测"近似循环"（如 `A B C` → `A B D` → `A B C`，中间有微小变异的循环模式）
+- **优先级 1**：给 CLI 的 `eval` / `compare` 命令添加 `--similarity-threshold` 参数，让这个功能端到端可用
+- **优先级 2**：考虑对 near-loop 的滑动窗口重叠簇做合并或去重，减少输出噪音
+- **可选**：补一个测试 case 验证独立 n-gram 的位置重叠场景（上次评审提到的 edge case）
