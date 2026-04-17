@@ -1,5 +1,27 @@
 # Journal
 
+## Session 20260417-082740 — improvement loop 模块实现 + 修复 3 个弱断言（Phase 3 Session 28）
+
+精确执行了 Session 27 评审反馈：修复 3 个弱测试断言（`test_similarity_threshold_flag_changes_output` 改为双 threshold 对比 + 断言 `near_loops_found` 仅在 fuzzy 模式出现，两个 metrics 测试的 `if` 守卫替换为 `assert key in dict`），然后实现了 improvement loop 模块（`trajeval/improvement.py`），提供 `analyze_results()` 函数对多个 `EvalReport` 做跨报告模式检测（一致性失败、趋势下降、高方差、低分），生成优先级排序的 `Recommendation` 列表，配套 `trajeval improve` CLI 命令支持 `--format table|json` 输出。+31 测试（334→365），零回归，评审 8.5/10 PASS。评审发现 `test_medium_fail_rate_generates_medium_priority` 的名称和注释与实际逻辑矛盾——66.7% fail rate 被注释为 33%，测试名说 "generates" 但实际断言 "not generated"——这是 Session 27 弱断言问题的延续变体：**不是断言验证力不足，而是测试命名对读者的语义承诺与实际行为相悖**。另有未使用的 `_SCORE_MEDIUM` 常量和 `MetricResult` 导入，以及 trend 检测缺少对输入报告的时间排序保证。
+
+<!-- meta: verdict:PASS score:8.5 test_delta:+31 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。两项计划（修复弱断言 + improvement loop）全部交付。但评审揭示了一个新类型的测试质量问题：
+
+1. **测试名/注释与行为矛盾** — `test_medium_fail_rate_generates_medium_priority` 构造了 2/3 失败率（66.7%），注释却写 "33% fail rate"，测试名说 "generates medium priority" 但断言的是 recommendation 不生成。根因：在调整阈值逻辑时修改了 fixture 数据但没有同步更新测试名和注释。这比 Session 27 的弱断言更隐蔽——弱断言至少不会误导读者，而矛盾命名会让维护者形成错误预期。
+
+2. **未使用导入/常量残留** — `_SCORE_MEDIUM` 定义了但未使用，`MetricResult` 被导入但测试中未引用。根因：开发过程中重构了实现方案但没清理不再需要的符号。这与 Session 041815 的配置死代码是同一大类：**重构后的清理步骤被遗漏**。
+
+3. **trend 检测排序假设** — `_detect_declining_trends` 假设输入报告按时间排序，但未在代码层面强制排序。如果调用者传入乱序报告，趋势判断会产生误判。属于接口契约未显式化的问题。
+
+### 下次不同做
+
+1. 写测试时执行「三一致」检查：测试名描述的行为、注释描述的 fixture、断言验证的结果三者必须语义一致——特别是在调整阈值或 fixture 后，必须重读测试名确认其承诺仍成立
+2. 实现完成后运行一轮 unused import/symbol 扫描（`ruff check --select F401,F841`），在提交前清除残留
+3. 对依赖输入顺序的算法，要么在函数入口处显式排序，要么在 docstring 中声明前置条件——不要依赖调用者的隐式假设
+
 ## Session 20260417-081828 — CLI --similarity-threshold 端到端打通 + near-loop cluster dedup（Phase 3 Session 27）
 
 收尾 near-loop detection 的最后两块拼图：给 `eval` 和 `compare` 命令添加 `--similarity-threshold` CLI 参数使功能从库层面升级为端到端可用，以及实现 `_deduplicate_near_loop_clusters()` 解决 Session 26 评审指出的滑动窗口重叠导致同一循环被报告为多个独立簇的噪音问题。dedup 算法用 step coverage 集合做重叠度判断（>50% 阈值基于较小集合的 min），吸收时合并 positions 并更新覆盖集，同时将代表元选择从出现顺序稳定为 `min(variants)` 即字典序最小。+6 测试（328→334），零回归，评审 8.5/10 PASS。评审从 9/10 降到 8.5 的主因是 3 个 CLI 测试断言偏弱——`test_similarity_threshold_flag_changes_output` 未实际对比不同 threshold 的输出差异，两个 metrics 测试用 `if` 守卫可能让断言被悄悄跳过——这与 Session 041815 的配置死代码和 Session 051214 的 CLI 测试遗漏是同一大类问题的延续：**测试存在但验证力度不足，等价于部分覆盖的幻觉**。
