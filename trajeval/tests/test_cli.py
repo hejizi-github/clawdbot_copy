@@ -959,3 +959,177 @@ class TestCalibrateCommand:
                 f.write(j.model_dump_json() + "\n")
 
         return annotations_file, judgments_file
+
+
+class TestInputFormat:
+    """CLI integration tests for --input-format option across all trace-reading commands."""
+
+    CLAWDBOT_FIXTURE = FIXTURES_DIR / "clawdbot_session.jsonl"
+
+    def test_eval_auto_detects_jsonl_as_clawdbot(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(self.CLAWDBOT_FIXTURE),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "overall_score" in data
+        assert "metrics" in data
+
+    def test_eval_auto_detects_json_as_json(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["passed"] is True
+
+    def test_eval_explicit_clawdbot_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(self.CLAWDBOT_FIXTURE),
+            "--input-format", "clawdbot",
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "overall_score" in data
+
+    def test_eval_explicit_json_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--input-format", "json",
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["passed"] is True
+
+    def test_eval_clawdbot_produces_different_trace_id(self):
+        runner = CliRunner()
+        clawdbot_result = runner.invoke(main, [
+            "eval", str(self.CLAWDBOT_FIXTURE),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        json_result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        clawdbot_data = json.loads(clawdbot_result.output)
+        json_data = json.loads(json_result.output)
+        assert clawdbot_data["overall_score"] != json_data["overall_score"] or \
+            len(clawdbot_data["metrics"]) == len(json_data["metrics"])
+
+    def test_compare_mixed_formats(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare",
+            str(FIXTURES_DIR / "simple_trace.json"),
+            str(self.CLAWDBOT_FIXTURE),
+            "--format", "json",
+        ])
+        assert result.exit_code in (0, 1)
+        data = json.loads(result.output)
+        assert "metric_deltas" in data
+        assert "overall_delta" in data
+
+    def test_compare_both_clawdbot(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare",
+            str(self.CLAWDBOT_FIXTURE),
+            str(self.CLAWDBOT_FIXTURE),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["has_regression"] is False
+
+    def test_compare_explicit_clawdbot_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare",
+            str(self.CLAWDBOT_FIXTURE),
+            str(self.CLAWDBOT_FIXTURE),
+            "--input-format", "clawdbot",
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["has_regression"] is False
+
+    def test_annotate_with_clawdbot_format(self, tmp_path):
+        out = tmp_path / "ann.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(self.CLAWDBOT_FIXTURE),
+            "--output", str(out),
+            "--dimensions", "task_completion",
+        ], input="4\n")
+        assert result.exit_code == 0
+        assert "Saved 1 annotation" in result.output
+
+    def test_annotate_explicit_clawdbot_format(self, tmp_path):
+        out = tmp_path / "ann.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(self.CLAWDBOT_FIXTURE),
+            "--input-format", "clawdbot",
+            "--output", str(out),
+            "--dimensions", "task_completion",
+        ], input="4\n")
+        assert result.exit_code == 0
+        assert "Saved 1 annotation" in result.output
+
+    @patch("trajeval.cli.judge")
+    def test_judge_with_clawdbot_format(self, mock_judge):
+        mock_judge.return_value = JudgeResult(
+            trace_id="clawdbot-test-001",
+            dimensions=[JudgeDimension(name="task_completion", score=4, explanation="good")],
+            overall_score=0.8,
+            model="test-model",
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(self.CLAWDBOT_FIXTURE),
+            "--input-format", "clawdbot",
+            "--threshold", "0.7",
+        ])
+        assert result.exit_code == 0
+        assert mock_judge.call_count == 1
+
+    @patch("trajeval.cli.judge")
+    def test_judge_auto_detects_clawdbot(self, mock_judge):
+        mock_judge.return_value = JudgeResult(
+            trace_id="clawdbot-test-001",
+            dimensions=[JudgeDimension(name="task_completion", score=4, explanation="good")],
+            overall_score=0.8,
+            model="test-model",
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(self.CLAWDBOT_FIXTURE),
+            "--threshold", "0.7",
+        ])
+        assert result.exit_code == 0
+        assert mock_judge.call_count == 1
+
+    def test_eval_malformed_jsonl_exits_1(self, tmp_path):
+        bad = tmp_path / "bad.jsonl"
+        bad.write_text('{"type":"session"}\n{bad json}\n')
+        runner = CliRunner()
+        result = runner.invoke(main, ["eval", str(bad)])
+        assert result.exit_code == 1
+        assert "Error" in result.output
+
+    def test_eval_empty_jsonl_exits_1(self, tmp_path):
+        empty = tmp_path / "empty.jsonl"
+        empty.write_text("")
+        runner = CliRunner()
+        result = runner.invoke(main, ["eval", str(empty)])
+        assert result.exit_code == 1
+        assert "Error" in result.output

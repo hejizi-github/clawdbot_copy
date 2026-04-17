@@ -19,12 +19,12 @@ def ingest_clawdbot_jsonl(source: str | Path) -> AgentTrace:
     if not path.exists():
         raise IngestError(f"File not found: {path}")
 
-    text = path.read_text(encoding="utf-8").strip()
-    if not text:
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
         raise IngestError(f"Empty JSONL file: {path}")
 
     entries = []
-    for i, line in enumerate(text.split("\n")):
+    for i, line in enumerate(raw.split("\n")):
         line = line.strip()
         if not line:
             continue
