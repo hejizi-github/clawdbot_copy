@@ -362,7 +362,7 @@ class TestJudgeConsistentFailure:
         report = analyze_judge_results(results)
         fail_findings = [f for f in report.findings if f.pattern == "consistently_failing"]
         assert len(fail_findings) == 1
-        assert fail_findings[0].metric == "task_completion"
+        assert fail_findings[0].metric == "judge:task_completion"
         recs = [r for r in report.recommendations if r.priority == Priority.HIGH]
         assert len(recs) >= 1
 
@@ -375,7 +375,7 @@ class TestJudgeConsistentFailure:
             for i in range(4, 10)
         ]
         report = analyze_judge_results(results)
-        fail_findings = [f for f in report.findings if f.metric == "reasoning_quality" and f.pattern == "frequently_failing"]
+        fail_findings = [f for f in report.findings if f.metric == "judge:reasoning_quality" and f.pattern == "frequently_failing"]
         assert len(fail_findings) == 1
         assert fail_findings[0].severity == Priority.MEDIUM
 
@@ -402,7 +402,7 @@ class TestJudgeTrendDetection:
         report = analyze_judge_results(results)
         declining = [f for f in report.findings if f.pattern == "declining"]
         assert len(declining) == 1
-        assert declining[0].metric == "task_completion"
+        assert declining[0].metric == "judge:task_completion"
 
     def test_no_trend_with_two_results(self):
         results = [
@@ -460,7 +460,7 @@ class TestJudgeLowScoring:
         report = analyze_judge_results(results)
         low = [f for f in report.findings if f.pattern == "low_scoring"]
         assert len(low) == 1
-        assert low[0].metric == "information_synthesis"
+        assert low[0].metric == "judge:information_synthesis"
 
 
 class TestJudgeDimensionAdvice:
@@ -539,8 +539,8 @@ class TestJudgeMultipleDimensions:
             _judge_result("t3", [("task_completion", 5), ("reasoning_quality", 2)]),
         ]
         report = analyze_judge_results(results)
-        tc_findings = [f for f in report.findings if f.metric == "task_completion"]
-        rq_findings = [f for f in report.findings if f.metric == "reasoning_quality"]
+        tc_findings = [f for f in report.findings if f.metric == "judge:task_completion"]
+        rq_findings = [f for f in report.findings if f.metric == "judge:reasoning_quality"]
         assert len(tc_findings) == 0
         assert len(rq_findings) > 0
 

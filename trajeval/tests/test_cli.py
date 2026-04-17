@@ -565,7 +565,7 @@ class TestImproveCommand:
         data = json.loads(result.output)
         assert data["num_evaluations"] >= 3
         assert "judge:reasoning_quality" in data["metric_summary"]
-        judge_findings = [f for f in data["findings"] if f["metric"] == "reasoning_quality"]
+        judge_findings = [f for f in data["findings"] if f["metric"] == "judge:reasoning_quality"]
         assert len(judge_findings) > 0
 
 

@@ -266,27 +266,27 @@ def analyze_judge_results(
 
         if fail_rate >= _JUDGE_FAIL_RATE_HIGH:
             evidence = f"Fails {fail_rate:.0%} of evaluations (mean score: {avg:.1f}/5)"
-            findings.append(Finding(metric=name, pattern="consistently_failing", severity=Priority.HIGH, evidence=evidence))
+            findings.append(Finding(metric=f"judge:{name}", pattern="consistently_failing", severity=Priority.HIGH, evidence=evidence))
             advice = _DIMENSION_ADVICE.get(name, {}).get("low", f"Investigate why {name} consistently scores low.")
             recommendations.append(Recommendation(title=f"Fix {name}", priority=Priority.HIGH, finding=evidence, suggestion=advice))
         elif fail_rate >= _JUDGE_FAIL_RATE_MEDIUM:
             evidence = f"Fails {fail_rate:.0%} of evaluations (mean score: {avg:.1f}/5)"
-            findings.append(Finding(metric=name, pattern="frequently_failing", severity=Priority.MEDIUM, evidence=evidence))
+            findings.append(Finding(metric=f"judge:{name}", pattern="frequently_failing", severity=Priority.MEDIUM, evidence=evidence))
             advice = _DIMENSION_ADVICE.get(name, {}).get("low", f"Improve {name} to reduce failure rate.")
             recommendations.append(Recommendation(title=f"Improve {name}", priority=Priority.MEDIUM, finding=evidence, suggestion=advice))
 
         if avg < _JUDGE_SCORE_LOW and fail_rate < _JUDGE_FAIL_RATE_MEDIUM:
-            findings.append(Finding(metric=name, pattern="low_scoring", severity=Priority.MEDIUM, evidence=f"Mean score {avg:.1f}/5 is below threshold {_JUDGE_SCORE_LOW}"))
+            findings.append(Finding(metric=f"judge:{name}", pattern="low_scoring", severity=Priority.MEDIUM, evidence=f"Mean score {avg:.1f}/5 is below threshold {_JUDGE_SCORE_LOW}"))
 
         if trend < -_JUDGE_TREND_THRESHOLD and len(scores) >= 3:
             severity = Priority.HIGH if trend < -1.0 else Priority.MEDIUM
             evidence = f"Score declining by {abs(trend):.1f} (first half avg: {mean(scores[:len(scores)//2]):.1f}, second half: {mean(scores[len(scores)//2:]):.1f})"
-            findings.append(Finding(metric=name, pattern="declining", severity=severity, evidence=evidence))
+            findings.append(Finding(metric=f"judge:{name}", pattern="declining", severity=severity, evidence=evidence))
             advice = _DIMENSION_ADVICE.get(name, {}).get("declining", f"{name} is trending downward — investigate recent changes.")
             recommendations.append(Recommendation(title=f"Investigate declining {name}", priority=severity, finding=f"Score declined by {abs(trend):.1f}", suggestion=advice))
 
         if sd > 1.0 and len(scores) >= 3:
-            findings.append(Finding(metric=name, pattern="high_variance", severity=Priority.LOW, evidence=f"Score std dev {sd:.2f} indicates inconsistent judging"))
+            findings.append(Finding(metric=f"judge:{name}", pattern="high_variance", severity=Priority.LOW, evidence=f"Score std dev {sd:.2f} indicates inconsistent judging"))
 
     recommendations.sort(key=lambda r: (0 if r.priority == Priority.HIGH else 1 if r.priority == Priority.MEDIUM else 2))
 
