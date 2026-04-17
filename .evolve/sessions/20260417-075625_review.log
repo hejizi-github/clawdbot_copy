@@ -1,0 +1,5 @@
+评审完成。**Verdict: PASS，加权总分 9/10。**
+
+两个修复都扎实：loop detection 的 n-gram 去重通过模式子序列检测 + 位置覆盖并集两层机制解决了双重计算问题，数学验证正确；`format_judge_ci` 的 `passed` 默认值从 fail-open 改为 auto-compute，与 CLI 行为一致。316 测试全绿，+7 新测试覆盖关键场景。
+
+主要建议：`_is_subpattern` docstring 措辞可优化，`positions[1:]` 跳过首次出现的逻辑值得加注释说明 "why"，以及可考虑 property-based testing 保证 `total_repeated_steps <= len(names)` 恒成立。
