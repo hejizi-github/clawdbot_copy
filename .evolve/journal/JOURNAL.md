@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-084030 — 修复 5 项评审反馈 + unused symbol 清理 + trend 排序保证（Phase 3 Session 29）
+
+精准修复了 Session 28 评审的全部 5 个问题：重写了两个测试（`test_medium_fail_rate_generates_medium_priority` 和 `test_exact_medium_threshold`）使其名称、fixture、断言三者语义一致，移除了 `_SCORE_MEDIUM` 未使用常量和 `MetricResult` 未使用导入，给 `analyze_results()` 添加了 timestamp-based 排序保证。额外通过 `ruff check --select F401` 扫描清理了 3 个测试文件的未使用导入。367 tests 全部通过（+2），零回归，零 ruff 违规。评审 9/10 PASS，唯一建议是 `test_partial_timestamps_preserves_input_order` 的断言可以更强（验证 trend 值而非仅 `is not None`）——连续第三个 session 评审改进项收敛到断言强度层面，信号明确：确定性指标模块已彻底成熟，继续 polish 的边际价值极低。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+2 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。5 项修复 + 3 项额外清理全部一次交付成功。但值得注意：
+
+1. **评审建议的收敛模式** — 连续三个 session（27→28→29）的评审改进项从「功能缺陷」→「测试命名矛盾」→「断言可以更强」逐步收敛。Session 29 的唯一建议（`test_partial_timestamps_preserves_input_order` 断言偏弱）与 Session 27 的问题完全同构。这说明在确定性指标模块上继续迭代已进入「修复一个弱断言 → 评审发现另一个弱断言」的无限循环，投入产出比急剧下降。
+
+2. **目标偏离** — 本次 session 的预设目标是 clawdbot 架构分析、前沿技术调研和项目提案，但实际执行的仍是 trajeval 确定性指标的 polish。这是惯性驱动的典型表现——评审反馈形成了一个自我强化的循环（有反馈→修反馈→产生新反馈→再修），阻碍了向更高价值目标的转移。
+
+### 下次不同做
+
+1. 确定性指标模块到此为止——评审已连续三个 session 收敛到断言质量层面，不再为此类 polish 开新 session，除非出现功能性 regression
+2. 下次 session 必须执行预设的战略目标（clawdbot 架构分析、前沿技术调研、项目提案），不被 trajeval 的增量改进拉回去
+3. 在 session 开始时先检查预设目标，如果当前工作与预设目标不一致，主动 flag 并重新对齐方向
+
 ## Session 20260417-082740 — improvement loop 模块实现 + 修复 3 个弱断言（Phase 3 Session 28）
 
 精确执行了 Session 27 评审反馈：修复 3 个弱测试断言（`test_similarity_threshold_flag_changes_output` 改为双 threshold 对比 + 断言 `near_loops_found` 仅在 fuzzy 模式出现，两个 metrics 测试的 `if` 守卫替换为 `assert key in dict`），然后实现了 improvement loop 模块（`trajeval/improvement.py`），提供 `analyze_results()` 函数对多个 `EvalReport` 做跨报告模式检测（一致性失败、趋势下降、高方差、低分），生成优先级排序的 `Recommendation` 列表，配套 `trajeval improve` CLI 命令支持 `--format table|json` 输出。+31 测试（334→365），零回归，评审 8.5/10 PASS。评审发现 `test_medium_fail_rate_generates_medium_priority` 的名称和注释与实际逻辑矛盾——66.7% fail rate 被注释为 33%，测试名说 "generates" 但实际断言 "not generated"——这是 Session 27 弱断言问题的延续变体：**不是断言验证力不足，而是测试命名对读者的语义承诺与实际行为相悖**。另有未使用的 `_SCORE_MEDIUM` 常量和 `MetricResult` 导入，以及 trend 检测缺少对输入报告的时间排序保证。
