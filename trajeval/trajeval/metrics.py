@@ -28,6 +28,7 @@ class MetricConfig(BaseModel):
     baseline_tokens: int | None = None
     loop_ngram_sizes: list[int] = Field(default=[2, 3])
     loop_min_repeats: int = 2
+    loop_similarity_threshold: float = 1.0
     recovery_window: int = 3
     latency_budget_ms: float | None = None
     pass_threshold: float = 0.7
@@ -120,7 +121,7 @@ def _output_indicates_error(output: dict) -> bool:
 
 
 def _is_subpattern(short: tuple, long: tuple) -> bool:
-    """Check if short pattern is a contiguous subsequence of long pattern repeated."""
+    """Check if short is a contiguous subsequence of long."""
     ls, ll = len(short), len(long)
     if ls >= ll:
         return False
@@ -128,6 +129,13 @@ def _is_subpattern(short: tuple, long: tuple) -> bool:
         if long[i : i + ls] == short:
             return True
     return False
+
+
+def _hamming_similarity(a: tuple, b: tuple) -> float:
+    """Fraction of positions where two same-length tuples match."""
+    if len(a) != len(b) or not a:
+        return 0.0
+    return sum(x == y for x, y in zip(a, b)) / len(a)
 
 
 def _deduplicate_loops(loops: list[dict]) -> list[dict]:
@@ -146,10 +154,58 @@ def _deduplicate_loops(loops: list[dict]) -> list[dict]:
     return kept
 
 
+def _find_near_loops(
+    names: list[str],
+    ngram_sizes: list[int],
+    min_repeats: int,
+    similarity_threshold: float,
+    exact_patterns: set[tuple],
+) -> list[dict]:
+    """Find near-duplicate loops: sequences that repeat with minor variations."""
+    near_loops: list[dict] = []
+
+    for n in ngram_sizes:
+        if len(names) < n:
+            continue
+        ngrams = [tuple(names[i : i + n]) for i in range(len(names) - n + 1)]
+
+        clusters: list[dict] = []
+        for i, gram in enumerate(ngrams):
+            merged = False
+            for cluster in clusters:
+                if _hamming_similarity(gram, cluster["representative"]) >= similarity_threshold:
+                    cluster["positions"].append(i)
+                    cluster["variants"].add(gram)
+                    merged = True
+                    break
+            if not merged:
+                clusters.append({
+                    "representative": gram,
+                    "positions": [i],
+                    "variants": {gram},
+                })
+
+        for cluster in clusters:
+            if len(cluster["positions"]) < min_repeats:
+                continue
+            if len(cluster["variants"]) == 1 and cluster["representative"] in exact_patterns:
+                continue
+            near_loops.append({
+                "pattern": list(cluster["representative"]),
+                "length": n,
+                "occurrences": len(cluster["positions"]),
+                "variants": len(cluster["variants"]),
+                "_positions": cluster["positions"],
+            })
+
+    return _deduplicate_loops(near_loops)
+
+
 def loop_detection(
     trace: AgentTrace,
     ngram_sizes: list[int] | None = None,
     min_repeats: int = 2,
+    similarity_threshold: float = 1.0,
 ) -> MetricResult:
     """Detect repeated step sequences via n-gram analysis on step names."""
     if ngram_sizes is None:
@@ -185,31 +241,48 @@ def loop_detection(
                 })
 
     loops_found = _deduplicate_loops(raw_loops)
+    exact_patterns = {tuple(l["pattern"]) for l in loops_found}
 
     repeated_positions: set[int] = set()
     for loop in loops_found:
         positions = loop.pop("_positions", [])
+        # Skip first occurrence — it's the "original", only repeats are wasted
         for pos in positions[1:]:
             for offset in range(loop["length"]):
                 repeated_positions.add(pos + offset)
 
+    near_loops_found: list[dict] = []
+    if similarity_threshold < 1.0:
+        near_loops_found = _find_near_loops(
+            names, ngram_sizes, min_repeats, similarity_threshold, exact_patterns,
+        )
+        for loop in near_loops_found:
+            positions = loop.pop("_positions", [])
+            for pos in sorted(positions)[1:]:
+                for offset in range(loop["length"]):
+                    repeated_positions.add(pos + offset)
+
     total_repeated_steps = len(repeated_positions)
 
-    if not loops_found:
+    if not loops_found and not near_loops_found:
         score = 1.0
     else:
         penalty = min(total_repeated_steps / max(len(names), 1), 0.9)
         score = round(1.0 - penalty, 4)
 
+    details: dict = {
+        "step_count": len(names),
+        "loops_found": loops_found,
+        "total_repeated_steps": total_repeated_steps,
+    }
+    if near_loops_found:
+        details["near_loops_found"] = near_loops_found
+
     return MetricResult(
         name="loop_detection",
         score=score,
         passed=score >= 0.7,
-        details={
-            "step_count": len(names),
-            "loops_found": loops_found,
-            "total_repeated_steps": total_repeated_steps,
-        },
+        details=details,
     )
 
 
@@ -344,6 +417,7 @@ def evaluate(trace: AgentTrace, config: MetricConfig | None = None) -> EvalRepor
             trace,
             ngram_sizes=config.loop_ngram_sizes,
             min_repeats=config.loop_min_repeats,
+            similarity_threshold=config.loop_similarity_threshold,
         ),
         token_efficiency(trace, baseline_tokens=config.baseline_tokens),
         error_recovery(trace, recovery_window=config.recovery_window),

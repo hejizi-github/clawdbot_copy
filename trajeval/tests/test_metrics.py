@@ -6,6 +6,7 @@ from trajeval.ingester import ingest_json
 from trajeval.metrics import (
     EvalReport,
     MetricConfig,
+    _hamming_similarity,
     error_recovery,
     evaluate,
     latency_budget,
@@ -636,3 +637,137 @@ class TestLatencyBudgetIntegration:
     def test_config_latency_budget_default_is_none(self):
         config = MetricConfig()
         assert config.latency_budget_ms is None
+
+
+class TestHammingSimilarity:
+    def test_identical(self):
+        assert _hamming_similarity(("A", "B", "C"), ("A", "B", "C")) == 1.0
+
+    def test_one_diff(self):
+        assert _hamming_similarity(("A", "B", "C"), ("A", "B", "D")) == pytest.approx(2 / 3)
+
+    def test_all_different(self):
+        assert _hamming_similarity(("A", "B"), ("C", "D")) == 0.0
+
+    def test_different_lengths(self):
+        assert _hamming_similarity(("A", "B"), ("A", "B", "C")) == 0.0
+
+    def test_empty(self):
+        assert _hamming_similarity((), ()) == 0.0
+
+
+class TestNearLoopDetection:
+    def test_near_loop_detected(self):
+        """A B C followed by A B D should be a near-loop with threshold=0.6."""
+        trace = AgentTrace(
+            trace_id="near1",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="D"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[3], similarity_threshold=0.6)
+        assert "near_loops_found" in result.details
+        near = result.details["near_loops_found"]
+        assert len(near) >= 1
+        assert near[0]["variants"] == 2
+
+    def test_exact_threshold_no_near_loops(self):
+        """With threshold=1.0, near-loop detection is disabled."""
+        trace = AgentTrace(
+            trace_id="near2",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="D"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[3], similarity_threshold=1.0)
+        assert "near_loops_found" not in result.details
+
+    def test_near_loop_increases_penalty(self):
+        """Near-loops should lower the score compared to exact-only."""
+        trace = AgentTrace(
+            trace_id="near3",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="D"),
+            ],
+        )
+        exact_only = loop_detection(trace, ngram_sizes=[3], similarity_threshold=1.0)
+        with_near = loop_detection(trace, ngram_sizes=[3], similarity_threshold=0.6)
+        assert with_near.score < exact_only.score
+
+    def test_pure_exact_not_duplicated_as_near(self):
+        """Exact matches with a single variant should not appear in near_loops_found."""
+        trace = AgentTrace(
+            trace_id="near4",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[2], similarity_threshold=0.5)
+        assert "near_loops_found" not in result.details
+
+    def test_near_loop_with_exact_and_variant(self):
+        """When an exact loop exists alongside a near-variant, both are reported."""
+        trace = AgentTrace(
+            trace_id="near5",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="D"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[3], similarity_threshold=0.6)
+        assert len(result.details["loops_found"]) >= 1
+        assert "near_loops_found" in result.details
+        near = result.details["near_loops_found"]
+        assert near[0]["variants"] == 2
+        assert near[0]["occurrences"] == 3
+
+    def test_config_similarity_flows_through_evaluate(self):
+        """MetricConfig.loop_similarity_threshold affects evaluate() results."""
+        trace = AgentTrace(
+            trace_id="near6",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="D"),
+            ],
+            total_tokens=TokenUsage(prompt=100, completion=50, total=150),
+        )
+        exact_config = MetricConfig(loop_similarity_threshold=1.0)
+        fuzzy_config = MetricConfig(loop_similarity_threshold=0.6)
+        exact_report = evaluate(trace, exact_config)
+        fuzzy_report = evaluate(trace, fuzzy_config)
+        exact_loop = next(m for m in exact_report.metrics if m.name == "loop_detection")
+        fuzzy_loop = next(m for m in fuzzy_report.metrics if m.name == "loop_detection")
+        assert fuzzy_loop.score < exact_loop.score
+
+    def test_config_similarity_default_is_exact(self):
+        config = MetricConfig()
+        assert config.loop_similarity_threshold == 1.0
