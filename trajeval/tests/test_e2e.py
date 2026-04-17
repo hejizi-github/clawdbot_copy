@@ -110,7 +110,8 @@ class TestEvalComparePipeline:
             "--format", "markdown",
             "--threshold", "0.3",
         ])
-        assert "##" in result.output or "Metric" in result.output
+        assert "##" in result.output
+        assert "Metric" in result.output
 
     def test_compare_ci_output(self):
         runner = CliRunner()
@@ -333,6 +334,90 @@ class TestParameterFlowThrough:
         assert long_recovery is not None, "error_recovery metric missing for recovery-window=10"
         assert short_recovery["details"]["recovery_window"] == 1
         assert long_recovery["details"]["recovery_window"] == 10
+
+
+class TestClawdbotE2EPipeline:
+    """Pipeline: eval Clawdbot JSONL → compare with JSON → improve."""
+
+    CLAWDBOT_FIXTURE = FIXTURES_DIR / "clawdbot_session.jsonl"
+
+    def test_clawdbot_eval_metric_values(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(self.CLAWDBOT_FIXTURE),
+            "--input-format", "clawdbot",
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+
+        assert data["trace_id"] == "clawdbot-test-001"
+        assert data["passed"] is True
+        assert data["overall_score"] >= 0.8
+
+        metrics_by_name = {m["name"]: m for m in data["metrics"]}
+        assert "step_efficiency" in metrics_by_name
+        assert "tool_accuracy" in metrics_by_name
+        assert metrics_by_name["tool_accuracy"]["details"]["total_tool_calls"] == 1
+        assert metrics_by_name["tool_accuracy"]["details"]["failed"] == 0
+        assert metrics_by_name["step_efficiency"]["details"]["total_steps"] == 3
+
+    def test_clawdbot_vs_json_compare(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare",
+            str(FIXTURES_DIR / "simple_trace.json"),
+            str(self.CLAWDBOT_FIXTURE),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code in (0, 1)
+        data = json.loads(result.output)
+        assert data["baseline_trace_id"] == "test-trace-001"
+        assert data["current_trace_id"] == "clawdbot-test-001"
+        assert isinstance(data["overall_delta"], (int, float))
+        assert len(data["metric_deltas"]) >= 4
+
+    def test_clawdbot_full_pipeline(self, tmp_path):
+        runner = CliRunner()
+
+        eval_result = runner.invoke(main, [
+            "eval", str(self.CLAWDBOT_FIXTURE),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        eval_data = json.loads(eval_result.output)
+        eval_file = tmp_path / "clawdbot_eval.json"
+        eval_file.write_text(json.dumps(eval_data))
+
+        improve_result = runner.invoke(main, [
+            "improve", str(eval_file), "--format", "json",
+        ])
+        assert improve_result.exit_code == 0
+        improve_data = json.loads(improve_result.output)
+        assert improve_data["num_evaluations"] == 1
+        assert "findings" in improve_data
+        assert "recommendations" in improve_data
+
+    def test_clawdbot_multi_eval_improve(self, tmp_path):
+        runner = CliRunner()
+        eval_files = []
+        for i in range(3):
+            result = runner.invoke(main, [
+                "eval", str(self.CLAWDBOT_FIXTURE),
+                "--input-format", "clawdbot",
+                "--format", "json", "--threshold", "0.1",
+            ])
+            assert result.exit_code == 0
+            f = tmp_path / f"eval_{i}.json"
+            f.write_text(result.output)
+            eval_files.append(str(f))
+
+        args = ["improve"] + eval_files + ["--format", "json"]
+        improve_result = runner.invoke(main, args)
+        assert improve_result.exit_code == 0
+        improve_data = json.loads(improve_result.output)
+        assert improve_data["num_evaluations"] == 3
+        assert isinstance(improve_data["metric_summary"], dict)
+        assert len(improve_data["metric_summary"]) >= 3
 
 
 class TestVersionCommand:

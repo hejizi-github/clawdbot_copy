@@ -180,7 +180,7 @@ class TestCLICIFormat:
             "--format", "ci", "--threshold", "0.3",
         ])
         assert result.exit_code == 0
-        assert "::notice" in result.output or "::warning" in result.output
+        assert "::notice" in result.output
         assert "## trajeval Evaluation Summary" in result.output
 
     def test_eval_ci_format_fail(self):

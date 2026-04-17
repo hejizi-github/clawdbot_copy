@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .batch import BatchResult, batch_evaluate
 from .calibration import AnnotationStore, HumanAnnotation, compute_correlation, load_judge_results
 from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
 from .compare import compare_reports, format_markdown
@@ -18,6 +19,7 @@ from .improvement import ImprovementReport, Priority, analyze_judge_results, ana
 from .ingester import IngestError, ingest_clawdbot_jsonl, ingest_json, ingest_otlp_json
 from .metrics import MetricConfig, evaluate
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
+from .storage import DEFAULT_DB_PATH, TrajevalDB
 
 console = Console()
 
@@ -78,6 +80,14 @@ def _load_trace(trace_file: Path, input_format: str):
     "--details", is_flag=True, default=False,
     help="Show metric details in table output",
 )
+@click.option(
+    "--save", is_flag=True, default=False,
+    help="Persist evaluation result to local SQLite history",
+)
+@click.option(
+    "--db", type=click.Path(path_type=Path), default=None,
+    help=f"SQLite database path (default: {DEFAULT_DB_PATH})",
+)
 def eval(
     trace_file: Path,
     fmt: str,
@@ -89,6 +99,8 @@ def eval(
     latency_budget: float | None,
     similarity_threshold: float,
     details: bool,
+    save: bool,
+    db: Path | None,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
@@ -108,6 +120,11 @@ def eval(
     )
     report = evaluate(trace, config)
 
+    if save:
+        with TrajevalDB(db) as store:
+            store.save_eval(report, agent_name=trace.agent_name)
+            click.echo(f"Saved to {store.path}", err=True)
+
     if fmt == "json":
         result = {
             "trace_id": report.trace_id,
@@ -122,6 +139,86 @@ def eval(
         _print_report(trace, report, show_details=details)
 
     sys.exit(0 if report.passed else 1)
+
+
+@main.command()
+@click.argument("directory", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--format", "fmt", type=click.Choice(["table", "json", "ci"]), default="table")
+@click.option(
+    "--input-format", "input_fmt",
+    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
+)
+@click.option(
+    "--threshold", type=float, default=0.7, help="Pass/fail threshold (0.0-1.0, default 0.7)"
+)
+@click.option("--expected-steps", type=int, default=None, help="Baseline step count for efficiency")
+@click.option(
+    "--baseline-tokens", type=int, default=None, help="Baseline token count for efficiency"
+)
+@click.option(
+    "--recovery-window", type=int, default=3,
+    help="Steps after an error to check for recovery (default 3)",
+)
+@click.option(
+    "--latency-budget", type=float, default=None,
+    help="Latency budget in milliseconds for speed scoring",
+)
+@click.option(
+    "--similarity-threshold", type=float, default=1.0,
+    help="Loop similarity threshold (0.0-1.0, default 1.0)",
+)
+def batch(
+    directory: Path,
+    fmt: str,
+    input_fmt: str,
+    threshold: float,
+    expected_steps: int | None,
+    baseline_tokens: int | None,
+    recovery_window: int,
+    latency_budget: float | None,
+    similarity_threshold: float,
+):
+    """Evaluate all traces in a directory and report aggregate statistics."""
+    config = MetricConfig(
+        expected_steps=expected_steps,
+        baseline_tokens=baseline_tokens,
+        recovery_window=recovery_window,
+        latency_budget_ms=latency_budget,
+        loop_similarity_threshold=similarity_threshold,
+        pass_threshold=threshold,
+    )
+    result = batch_evaluate(directory, config=config, input_format=input_fmt)
+
+    if result.total_traces == 0:
+        console.print("[yellow]No trace files found in directory[/yellow]")
+        sys.exit(1)
+
+    if fmt == "json":
+        output = {
+            "total_traces": result.total_traces,
+            "passed_traces": result.passed_traces,
+            "failed_traces": result.failed_traces,
+            "overall_pass_rate": result.overall_pass_rate,
+            "metric_aggregates": [a.model_dump() for a in result.metric_aggregates],
+            "traces": [
+                {
+                    "trace_id": r.trace_id,
+                    "file": r.file_path,
+                    "overall_score": r.report.overall_score,
+                    "passed": r.report.passed,
+                }
+                for r in result.trace_results
+            ],
+            "errors": result.errors,
+        }
+        click.echo(json.dumps(output, indent=2))
+    elif fmt == "ci":
+        _print_batch_ci(result)
+    else:
+        _print_batch_report(result)
+
+    sys.exit(0 if result.failed_traces == 0 else 1)
 
 
 @main.command(name="judge")
@@ -153,9 +250,18 @@ def eval(
     "--aggregation", type=click.Choice(["median", "mean"]), default="median",
     help="Aggregation method for ensemble scoring (default median)",
 )
+@click.option(
+    "--save", is_flag=True, default=False,
+    help="Persist judge result to local SQLite history",
+)
+@click.option(
+    "--db", type=click.Path(path_type=Path), default=None,
+    help=f"SQLite database path (default: {DEFAULT_DB_PATH})",
+)
 def judge_cmd(
     trace_file: Path, model: str, fmt: str, input_fmt: str, dimensions: str,
     threshold: float, no_randomize: bool, judges: int, aggregation: str,
+    save: bool, db: Path | None,
 ):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
@@ -184,6 +290,11 @@ def judge_cmd(
         sys.exit(1)
 
     passed = result.overall_score >= threshold
+
+    if save:
+        with TrajevalDB(db) as store:
+            store.save_judge(result, agent_name=trace.agent_name, passed=passed)
+            click.echo(f"Saved to {store.path}", err=True)
 
     if fmt == "json":
         output = {
@@ -471,6 +582,78 @@ def improve(eval_files: tuple[Path, ...], fmt: str, judge_files: tuple[Path, ...
         click.echo(json.dumps(merged.model_dump(), indent=2))
     else:
         _print_improvement_report(merged)
+
+
+@main.command()
+@click.option(
+    "--db", type=click.Path(path_type=Path), default=None,
+    help=f"SQLite database path (default: {DEFAULT_DB_PATH})",
+)
+@click.option(
+    "--type", "result_type", type=click.Choice(["eval", "judge", "all"]),
+    default="all", help="Type of results to show",
+)
+@click.option("--agent", default=None, help="Filter by agent name")
+@click.option("--limit", type=click.IntRange(min=1), default=20, help="Max results to show")
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+def history(db: Path | None, result_type: str, agent: str | None, limit: int, fmt: str):
+    """View past evaluation and judge results from the local database."""
+    with TrajevalDB(db) as store:
+        evals = []
+        judges = []
+        if result_type in ("eval", "all"):
+            evals = store.list_evals(agent_name=agent, limit=limit)
+        if result_type in ("judge", "all"):
+            judges = store.list_judges(agent_name=agent, limit=limit)
+
+    if fmt == "json":
+        output = {
+            "eval_results": [
+                {"trace_id": e.trace_id, "score": e.overall_score, "passed": e.passed, "timestamp": e.timestamp}
+                for e in evals
+            ],
+            "judge_results": [
+                {"trace_id": j.trace_id, "score": j.overall_score, "model": j.model}
+                for j in judges
+            ],
+        }
+        click.echo(json.dumps(output, indent=2))
+        return
+
+    from datetime import datetime, timezone
+
+    if evals:
+        table = Table(title=f"Eval History ({len(evals)})")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Score", justify="right")
+        table.add_column("Status", justify="center")
+        table.add_column("Time", style="dim")
+        for e in evals:
+            score_style = "green" if e.passed else "red"
+            status = "[green]PASS[/green]" if e.passed else "[red]FAIL[/red]"
+            ts = datetime.fromtimestamp(e.timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+            table.add_row(
+                e.trace_id[:20],
+                f"[{score_style}]{e.overall_score:.2f}[/{score_style}]",
+                status, ts,
+            )
+        console.print(table)
+
+    if judges:
+        table = Table(title=f"Judge History ({len(judges)})")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Model", style="dim")
+        table.add_column("Score", justify="right")
+        for j in judges:
+            score_color = "green" if j.overall_score >= 0.7 else "yellow" if j.overall_score >= 0.5 else "red"
+            table.add_row(
+                j.trace_id[:20], j.model,
+                f"[{score_color}]{j.overall_score:.0%}[/{score_color}]",
+            )
+        console.print(table)
+
+    if not evals and not judges:
+        console.print("[dim]No results found.[/dim]")
 
 
 def _print_improvement_report(report):
@@ -773,6 +956,70 @@ def _print_report(trace, report, show_details: bool = False):
         overall_row.append("")
     scores.add_row(*overall_row)
     console.print(scores)
+
+
+def _print_batch_report(result: BatchResult):
+    status = "[green bold]ALL PASS[/green bold]" if result.failed_traces == 0 else "[red bold]FAILURES[/red bold]"
+    console.print(f"\n[bold]Batch Evaluation[/bold]  {status}")
+    console.print(
+        f"Traces: {result.total_traces} total, "
+        f"[green]{result.passed_traces} passed[/green], "
+        f"[red]{result.failed_traces} failed[/red]  "
+        f"(pass rate: {result.overall_pass_rate:.0%})\n"
+    )
+
+    agg_table = Table(title="Metric Aggregates")
+    agg_table.add_column("Metric", style="cyan")
+    agg_table.add_column("Mean", justify="right")
+    agg_table.add_column("Min", justify="right")
+    agg_table.add_column("Max", justify="right")
+    agg_table.add_column("Std Dev", justify="right")
+    agg_table.add_column("Fail Rate", justify="right")
+
+    for a in result.metric_aggregates:
+        mean_color = "green" if a.mean_score >= 0.7 else "yellow" if a.mean_score >= 0.5 else "red"
+        fail_color = "green" if a.fail_rate == 0 else "yellow" if a.fail_rate < 0.3 else "red"
+        agg_table.add_row(
+            a.name,
+            f"[{mean_color}]{a.mean_score:.2f}[/{mean_color}]",
+            f"{a.min_score:.2f}",
+            f"{a.max_score:.2f}",
+            f"{a.std_dev:.2f}",
+            f"[{fail_color}]{a.fail_rate:.0%}[/{fail_color}]",
+        )
+    console.print(agg_table)
+
+    if result.failed_traces > 0:
+        console.print(f"\n[bold]Failed Traces[/bold]")
+        for r in result.trace_results:
+            if not r.report.passed:
+                failed_metrics = [m.name for m in r.report.metrics if not m.passed]
+                console.print(
+                    f"  [red]FAIL[/red] {Path(r.file_path).name} "
+                    f"(score: {r.report.overall_score:.2f}, failed: {', '.join(failed_metrics)})"
+                )
+
+    if result.errors:
+        console.print(f"\n[bold]Errors ({len(result.errors)})[/bold]")
+        for e in result.errors:
+            console.print(f"  [yellow]SKIP[/yellow] {Path(e['file']).name}: {e['error']}")
+
+    console.print()
+
+
+def _print_batch_ci(result: BatchResult):
+    lines = [
+        f"BATCH_TOTAL={result.total_traces}",
+        f"BATCH_PASSED={result.passed_traces}",
+        f"BATCH_FAILED={result.failed_traces}",
+        f"BATCH_PASS_RATE={result.overall_pass_rate}",
+        f"BATCH_ERRORS={len(result.errors)}",
+    ]
+    for a in result.metric_aggregates:
+        key = a.name.upper()
+        lines.append(f"METRIC_{key}_MEAN={a.mean_score}")
+        lines.append(f"METRIC_{key}_FAIL_RATE={a.fail_rate}")
+    click.echo("\n".join(lines))
 
 
 if __name__ == "__main__":

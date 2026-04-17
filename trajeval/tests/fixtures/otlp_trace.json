@@ -3,8 +3,7 @@
     {
       "resource": {
         "attributes": [
-          {"key": "service.name", "value": {"stringValue": "my-agent"}},
-          {"key": "agent.task", "value": {"stringValue": "Summarize the quarterly report"}}
+          {"key": "service.name", "value": {"stringValue": "my-agent"}}
         ]
       },
       "scopeSpans": [
@@ -20,11 +19,10 @@
               "startTimeUnixNano": "1700000000000000000",
               "endTimeUnixNano": "1700000002000000000",
               "attributes": [
-                {"key": "gen_ai.system", "value": {"stringValue": "openai"}},
-                {"key": "gen_ai.prompt", "value": {"stringValue": "Summarize Q3 results"}},
-                {"key": "gen_ai.completion", "value": {"stringValue": "Q3 revenue grew 15% YoY..."}},
-                {"key": "gen_ai.usage.prompt_tokens", "value": {"intValue": "150"}},
-                {"key": "gen_ai.usage.completion_tokens", "value": {"intValue": "200"}}
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
+                {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-4"}},
+                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "150"}},
+                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "200"}}
               ],
               "status": {"code": 0}
             },
@@ -32,13 +30,15 @@
               "traceId": "abc123def456",
               "spanId": "span002",
               "parentSpanId": "span001",
-              "name": "tool.read_file",
+              "name": "execute_tool read_file",
               "kind": 1,
               "startTimeUnixNano": "1700000002000000000",
               "endTimeUnixNano": "1700000002500000000",
               "attributes": [
-                {"key": "tool.name", "value": {"stringValue": "read_file"}},
-                {"key": "tool.parameters", "value": {"stringValue": "{\"path\": \"report.pdf\"}"}}
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "execute_tool"}},
+                {"key": "gen_ai.tool.name", "value": {"stringValue": "read_file"}},
+                {"key": "gen_ai.tool.call.arguments", "value": {"stringValue": "{\"path\": \"report.pdf\"}"}},
+                {"key": "gen_ai.tool.call.result", "value": {"stringValue": "File content here..."}}
               ],
               "status": {"code": 0}
             },
@@ -51,11 +51,11 @@
               "startTimeUnixNano": "1700000002500000000",
               "endTimeUnixNano": "1700000005000000000",
               "attributes": [
-                {"key": "gen_ai.system", "value": {"stringValue": "openai"}},
-                {"key": "gen_ai.prompt", "value": {"stringValue": "Now summarize the full report"}},
-                {"key": "gen_ai.completion", "value": {"stringValue": "The quarterly report shows strong performance..."}},
-                {"key": "gen_ai.usage.prompt_tokens", "value": {"intValue": "500"}},
-                {"key": "gen_ai.usage.completion_tokens", "value": {"intValue": "300"}}
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
+                {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-4"}},
+                {"key": "gen_ai.output.messages", "value": {"stringValue": "The quarterly report shows strong performance..."}},
+                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "500"}},
+                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "300"}}
               ],
               "status": {"code": 0}
             }
