@@ -1,0 +1,10 @@
+**Session 27 complete.** 
+
+**What changed:**
+1. Added `--similarity-threshold` CLI parameter to both `eval` and `compare` commands — near-loop detection is now end-to-end usable from the CLI
+2. Implemented near-loop cluster deduplication: `_deduplicate_near_loop_clusters()` merges clusters with >50% step coverage overlap, eliminating the sliding window noise issue
+3. Stabilized representative selection to lexicographic smallest variant
+
+**Test delta:** 328 → 334 (+6), zero regressions.
+
+**Next session:** Consider shifting focus away from deterministic metrics (now highly mature) toward the improvement loop design or other high-value directions like LLM judge integration testing.
