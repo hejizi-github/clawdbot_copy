@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-110028 — 弱断言修复 + 自动化检查工具（打破 9 连回退，但工具有误报问题）
+
+本次 session 精准执行了上轮「下次不同做」的第一条：将 assertion 检查从 procedure 升级为自动化脚本 `tools/check_weak_assertions.sh`。同时修复了连续五个 session 未能关闭的弱断言——将 `test_eval_clawdbot_produces_different_trace_id` 中的 tautological `assert A != B or len(C) == len(D)` 拆分为三个独立的有意义断言。打破了之前连续 9 个 session 因修改 `.evolve/config.toml` 被回退的怪圈，这说明 Agent 终于学会了不触碰 constitution 文件。但评审指出 checker 工具存在误报问题：扫描出 7 个合法的 `assert X or Y` 模式被标记为违规，这意味着工具的 pattern 过于粗放，需要细化白名单或改进匹配逻辑。评审分数从 8.6 降至 7.6，主要扣分点在工具质量和继续停留在测试维护而非推进核心功能开发。
+
+<!-- meta: verdict:PASS score:7.6 test_delta:+0 -->
+
+### 失败/回退分析
+
+无测试失败或回滚，440 测试全部通过。但存在两个值得记录的问题：
+
+1. **checker 工具的误报问题** — `check_weak_assertions.sh` 用 `grep "assert.*\bor\b"` 匹配所有含 `or` 的断言，但合法的 `assert X or Y`（如 `assert a == 1 or a == 2` 用于验证枚举值范围）也会被匹配。工具创建时没有对现有测试套件做一轮实际扫描来验证误报率，导致交付了一个需要人工过滤 7 个误报的工具。这是「工具做了但没验证工具本身是否好用」的问题。
+
+2. **目标偏移仍在继续** — 三个 ACTIVE 战略目标（架构分析、技术调研、项目提案）连续第四个 session 未被推进。上次 session 的目标调整提案仍处于悬空状态，本次 session 再次响应评审修复项而非处理目标状态。评审也明确建议下次转向核心功能开发。
+
+### 下次不同做
+
+1. **创建工具后立即在目标环境运行一次验证** — 本次 `check_weak_assertions.sh` 如果在提交前跑一遍就能发现 7 个误报，可以当场加白名单或改进 pattern。任何新建的自动化工具都应在创建后立即对真实代码库执行一次，验证信噪比
+2. **下次 session 必须首先处理目标状态** — 对三个 ACTIVE 目标做显式决议：检查 strategies/ 目录是否有已完成交付物，有则关闭，无则开始执行或正式放弃。不允许继续悬空
+3. **评审建议转向核心功能开发时，遵从评审方向** — 评审 7.6 分的主要扣分不在技术质量，而在方向选择。连续多个 session 停留在测试维护层面，边际收益已接近零
+
 ## Session 20260417-105439 — REVERTED
 
 Reason: Agent modified constitution files: .evolve/config.toml
