@@ -1,0 +1,5 @@
+**Session 26 complete (Phase 3 Session 26).**
+
+**What changed:** Implemented near-duplicate loop detection — when `loop_similarity_threshold < 1.0`, `loop_detection` now finds step sequences that repeat with minor variations (e.g., `A B C` → `A B D`) via hamming similarity clustering. Also fixed `_is_subpattern` docstring and added the why-comment for `positions[1:]` per Session 25 review. +12 tests (316→328), zero regressions.
+
+**Next:** The CLI doesn't yet expose `--similarity-threshold` for `eval`/`compare` commands — adding that parameter would make the feature end-to-end usable. Also consider adding a test for the reviewer's edge case: independent n-grams that overlap positions.
