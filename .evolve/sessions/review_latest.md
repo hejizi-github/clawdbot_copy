@@ -3,26 +3,29 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 8/10 — 让 near-loop detection 从 CLI 端到端可用是合理的增量改进，但 trajeval 确定性指标已趋成熟，session log 自己也指出应转向更高价值方向
-- 完成度 (25%): 8/10 — 计划中三项（CLI 参数、cluster dedup、测试）全部交付，6 个新测试通过，但部分测试断言较弱（详见下方）
-- 准确性 (20%): 9/10 — dedup 算法逻辑正确：step coverage 重叠度计算、基于 min 较小集合的 >50% 阈值、lexicographic min 作为稳定代表均无问题；hamming similarity 实现也正确
-- 一致性 (15%): 9/10 — CLI 选项完全遵循已有 `--recovery-window` / `--latency-budget` 的模式，命名、默认值、help text 风格统一
-- 副作用 (10%): 10/10 — 328 条既有测试零回归，变更干净隔离在 metrics.py 和 cli.py 中
+- 方向正确性 (30%): 9/10 — improvement loop 是 project-proposal 中明确规划的核心差异化功能，同时修复了上次评审指出的弱断言，方向完全正确。
+- 完成度 (25%): 8/10 — 模块功能完整：5 种模式检测（consistent failure, frequent failure, low scoring, declining trend, high variance）、metric-specific 建议、优先级排序、CLI 集成（table/json）、31 个新测试。`_SCORE_MEDIUM` 常量定义但未使用，`MetricResult` 在 improvement.py 中导入但未引用，属小遗漏。
+- 准确性 (20%): 7/10 — 核心逻辑正确，但 `test_medium_fail_rate_generates_medium_priority`（test_improvement.py:51）有明显问题：测试数据是 2/3 失败 = 66.7% fail rate，注释却写 "33% fail rate"；测试名称说 "generates_medium_priority" 但实际断言的是 NOT generated。测试碰巧通过（66.7% >= 50% 走了 HIGH 分支跳过了 MEDIUM elif），但文档化的推理是错的。另外 trend 检测依赖 reports 列表的顺序，但没有对时间排序做任何保证或文档说明。
+- 一致性 (15%): 9/10 — 与已有代码风格完全一致：Pydantic 模型、Click CLI、Rich 表格输出、JSON 格式、fixture 文件模式，和 project-proposal 规划高度吻合。
+- 副作用 (10%): 10/10 — 365 tests 全部通过，无回归。新模块完全隔离，只添加了一个 import 到 cli.py。
 
 **加权总分**: 8.5/10
 
 **做得好的地方**:
-- `_deduplicate_near_loop_clusters()` 设计合理：先按 occurrences 降序排、用 step coverage 集合判重叠、吸收时合并 positions 并更新覆盖集，避免了 O(n^2) 的 pattern-pair 比较
-- 在 `for n in ngram_sizes` 循环内调用 cluster dedup，再在外层用 `_deduplicate_loops()` 做跨 n-gram-size 去重，两级去重策略清晰
-- 稳定代表选择 `min(cluster["variants"])` 简洁正确（tuple 的 lexicographic 比较）
-- CLI 两个命令（eval/compare）同步添加，没有遗漏
+- improvement.py 设计干净，单一函数入口 `analyze_results()` 返回结构化报告，Pydantic 模型保证了 JSON 序列化一致性
+- `_METRIC_ADVICE` 字典提供了具体可操作的建议，且对未知 metric 有优雅降级（generic fallback）
+- 测试覆盖全面：空输入、单结果、多指标独立分析、边界阈值、序列化、排序，覆盖了主要路径和边缘情况
+- CLI 的 `--format json` 输出使得 CI 集成非常自然
+- 上次评审指出的 3 个弱断言全部修复，且修复方式合理（test_metrics.py 中去掉了 `if` guards 改为 `assert key in dict`，test_cli.py 中增加了比较两种阈值模式的差异）
 
 **需要改进的地方**:
-- `test_similarity_threshold_flag_changes_output`（test_cli.py:180）断言 `assert loop_m is not None` 实际上永远为真（`next()` 找不到会抛 StopIteration，不会返回 None）。这个测试名暗示要验证"不同 threshold 产生不同输出"，但并未比较默认 threshold=1.0 和 0.5 的结果差异。建议：分别用 threshold=1.0 和 0.5 调用，断言 near_loops_found 在低阈值时出现、在高阈值时不出现
-- `test_similarity_threshold_flag_flows_through`（test_cli.py:563）同理，只断言了 `"metric_deltas" in data` 但未断言 exact 和 fuzzy 结果有实质差异。建议至少断言 loop_detection 的 delta 或 details 不同
-- `test_stable_representative_lexicographic`（test_metrics.py:796）和 `test_independent_near_clusters_both_kept`（test_metrics.py:813）使用 `if "near_loops_found" in result.details` 保护断言——虽然经分析两个测试的输入确实会触发 near loops，但条件守卫让测试在行为变化时会悄悄跳过断言而非失败。建议去掉 `if` 改为直接断言 key 存在
+1. **test_medium_fail_rate_generates_medium_priority** 名称和注释与实际行为矛盾。2/3 = 66.7% fail rate，不是 33%。测试名暗示 "generates medium" 但实际断言 "not generated"。建议：要么修正为真正测试 medium 阈值的数据（比如 3 fail + 7 pass = 30%），要么重命名为 `test_high_fail_rate_skips_medium_pattern` 并修正注释。
+2. **`_SCORE_MEDIUM = 0.7` 未使用** — 要么删除，要么在某个检测逻辑中使用它（比如增加 "borderline" 模式检测）。
+3. **`MetricResult` 导入未使用** — improvement.py:10 导入了 `MetricResult` 但代码中没有引用，应移除。
+4. **trend 检测缺少排序保证** — `analyze_results` 按列表顺序将 reports 分为前半/后半来计算趋势，但调用者没有义务按时间排序传入。建议在 docstring 中明确说明输入应按时间排序，或者在 EvalReport 中加入 timestamp 字段用于自动排序。
+5. **`test_exact_medium_threshold` 断言不充分** — 只验证了 fail_rate 数学正确（3/7），但没有断言是否触发了 `frequently_failing` finding 或生成了 MEDIUM recommendation，丢失了对业务逻辑的验证。
 
 **下次 session 的建议**:
-- Session log 自己提到"Consider shifting focus away from deterministic metrics"，评审同意这个判断——确定性指标模块已高度成熟（334 tests），继续打磨边际收益递减
-- 优先推进 LLM judge 集成测试或 improvement loop 设计，这些是 project-proposal.md 中尚未充分实现的高价值模块
-- 如果继续在 metrics 上工作，建议优先补强上述弱测试的断言，而非添加新功能
+- 优先修复上述第 1、3 点（test 命名/注释错误和未使用导入），这些是准确性问题
+- 考虑为 trend 检测增加排序机制或文档约束（第 4 点）
+- 按 session log 中的规划，下一个高价值方向是将 LLM judge 结果整合到 improvement 分析中，或实现 compare 模式的时间线追踪
