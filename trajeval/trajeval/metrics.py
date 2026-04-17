@@ -21,6 +21,7 @@ class EvalReport(BaseModel):
     metrics: list[MetricResult] = Field(default_factory=list)
     overall_score: float = 0.0
     passed: bool = False
+    timestamp: float | None = None
 
 
 class MetricConfig(BaseModel):

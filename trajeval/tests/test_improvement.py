@@ -10,7 +10,11 @@ from trajeval.improvement import (
 from trajeval.metrics import EvalReport, MetricResult
 
 
-def _report(trace_id: str, metrics: list[tuple[str, float, bool]]) -> EvalReport:
+def _report(
+    trace_id: str,
+    metrics: list[tuple[str, float, bool]],
+    timestamp: float | None = None,
+) -> EvalReport:
     return EvalReport(
         trace_id=trace_id,
         metrics=[
@@ -18,6 +22,7 @@ def _report(trace_id: str, metrics: list[tuple[str, float, bool]]) -> EvalReport
         ],
         overall_score=sum(s for _, s, _ in metrics) / len(metrics) if metrics else 0.0,
         passed=all(p for _, _, p in metrics),
+        timestamp=timestamp,
     )
 
 
@@ -50,13 +55,18 @@ class TestConsistentFailure:
 
     def test_medium_fail_rate_generates_medium_priority(self):
         reports = [
-            _report("t1", [("loop_detection", 0.4, False)]),
-            _report("t2", [("loop_detection", 0.8, True)]),
-            _report("t3", [("loop_detection", 0.35, False)]),
+            _report(f"t{i}", [("loop_detection", 0.4, False)])
+            for i in range(4)
+        ] + [
+            _report(f"t{i}", [("loop_detection", 0.8, True)])
+            for i in range(4, 10)
         ]
         report = analyze_results(reports)
         fail_findings = [f for f in report.findings if f.metric == "loop_detection" and f.pattern == "frequently_failing"]
-        assert len(fail_findings) == 0, "33% fail rate should NOT trigger medium threshold (30%)"
+        assert len(fail_findings) == 1, "40% fail rate should trigger medium threshold (>= 30%)"
+        assert fail_findings[0].severity == Priority.MEDIUM
+        recs = [r for r in report.recommendations if "loop_detection" in r.title]
+        assert any(r.priority == Priority.MEDIUM for r in recs)
 
     def test_exact_medium_threshold(self):
         reports = [
@@ -71,6 +81,11 @@ class TestConsistentFailure:
         report = analyze_results(reports)
         fail_rate = report.metric_summary["loop_detection"]["fail_rate"]
         assert abs(fail_rate - 3/7) < 0.01
+        fail_findings = [f for f in report.findings if f.metric == "loop_detection" and f.pattern == "frequently_failing"]
+        assert len(fail_findings) == 1, "3/7 ≈ 42.8% fail rate should trigger medium threshold (>= 30%)"
+        assert fail_findings[0].severity == Priority.MEDIUM
+        recs = [r for r in report.recommendations if "loop_detection" in r.title]
+        assert any(r.priority == Priority.MEDIUM for r in recs)
 
     def test_all_passing_no_failure_finding(self):
         reports = [
@@ -117,6 +132,29 @@ class TestTrendDetection:
         report = analyze_results(reports)
         declining = [f for f in report.findings if f.pattern == "declining"]
         assert len(declining) == 0
+
+    def test_timestamp_sorting_corrects_shuffled_input(self):
+        reports = [
+            _report("t5", [("tool_accuracy", 0.5, False)], timestamp=5.0),
+            _report("t1", [("tool_accuracy", 0.95, True)], timestamp=1.0),
+            _report("t6", [("tool_accuracy", 0.45, False)], timestamp=6.0),
+            _report("t2", [("tool_accuracy", 0.9, True)], timestamp=2.0),
+            _report("t4", [("tool_accuracy", 0.6, False)], timestamp=4.0),
+            _report("t3", [("tool_accuracy", 0.85, True)], timestamp=3.0),
+        ]
+        report = analyze_results(reports)
+        declining = [f for f in report.findings if f.pattern == "declining"]
+        assert len(declining) == 1
+        assert declining[0].metric == "tool_accuracy"
+
+    def test_partial_timestamps_preserves_input_order(self):
+        reports = [
+            _report("t1", [("step_efficiency", 0.5, False)], timestamp=3.0),
+            _report("t2", [("step_efficiency", 0.9, True)]),
+            _report("t3", [("step_efficiency", 0.85, True)], timestamp=1.0),
+        ]
+        report = analyze_results(reports)
+        assert report.metric_summary["step_efficiency"]["trend"] is not None
 
 
 class TestHighVariance:

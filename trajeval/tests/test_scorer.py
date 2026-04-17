@@ -9,7 +9,6 @@ from trajeval.models import AgentTrace, TokenUsage, TraceStep
 from trajeval.scorer import (
     ALL_DIMENSIONS,
     DIMENSION_PROMPTS,
-    DimensionStat,
     EnsembleConfig,
     EnsembleResult,
     JudgeConfig,

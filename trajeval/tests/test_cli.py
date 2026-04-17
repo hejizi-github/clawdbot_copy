@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 from trajeval.calibration import HumanAnnotation
 from trajeval.cli import _format_details_compact, main
-from trajeval.scorer import ALL_DIMENSIONS, DimensionStat, EnsembleConfig, EnsembleResult, JudgeDimension, JudgeResult
+from trajeval.scorer import ALL_DIMENSIONS, DimensionStat, EnsembleResult, JudgeDimension, JudgeResult
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

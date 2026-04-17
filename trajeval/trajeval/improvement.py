@@ -7,7 +7,7 @@ from statistics import mean, stdev
 
 from pydantic import BaseModel, Field
 
-from .metrics import EvalReport, MetricResult
+from .metrics import EvalReport
 
 
 class Priority(str, Enum):
@@ -67,14 +67,20 @@ _METRIC_ADVICE = {
 _FAIL_RATE_HIGH = 0.5
 _FAIL_RATE_MEDIUM = 0.3
 _SCORE_LOW = 0.5
-_SCORE_MEDIUM = 0.7
 _TREND_THRESHOLD = 0.1
 
 
 def analyze_results(reports: list[EvalReport]) -> ImprovementReport:
-    """Analyze multiple evaluation reports and produce an improvement report."""
+    """Analyze multiple evaluation reports and produce an improvement report.
+
+    Reports should be ordered chronologically for accurate trend detection.
+    If reports have ``timestamp`` set, they are sorted automatically.
+    """
     if not reports:
         return ImprovementReport()
+
+    if all(r.timestamp is not None for r in reports):
+        reports = sorted(reports, key=lambda r: r.timestamp)  # type: ignore[arg-type]
 
     metric_scores: dict[str, list[float]] = {}
     metric_passed: dict[str, list[bool]] = {}
