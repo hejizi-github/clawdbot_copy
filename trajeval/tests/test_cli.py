@@ -1021,8 +1021,7 @@ class TestInputFormat:
         ])
         clawdbot_data = json.loads(clawdbot_result.output)
         json_data = json.loads(json_result.output)
-        assert clawdbot_data["overall_score"] != json_data["overall_score"] or \
-            len(clawdbot_data["metrics"]) == len(json_data["metrics"])
+        assert clawdbot_data["trace_id"] != json_data["trace_id"]
 
     def test_compare_mixed_formats(self):
         runner = CliRunner()
