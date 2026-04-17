@@ -61,7 +61,8 @@ def format_eval_ci(report: EvalReport, threshold: float = 0.7) -> str:
     overall_icon = "✅" if report.passed else "❌"
     overall_status = "PASS" if report.passed else "FAIL"
     lines.append("")
-    lines.append(f"**Overall: {report.overall_score:.2f} — {overall_icon} {overall_status}** (threshold: {threshold:.2f})")
+    overall = f"**Overall: {report.overall_score:.2f} — {overall_icon} {overall_status}**"
+    lines.append(f"{overall} (threshold: {threshold:.2f})")
 
     return "\n".join(lines)
 
@@ -102,7 +103,8 @@ def format_compare_ci(result: ComparisonResult) -> str:
         else:
             icon = "⚪"
             status = "unchanged"
-        lines.append(f"| {d.name} | {d.baseline_score:.2f} | {d.current_score:.2f} | {sign}{d.delta:.2f} | {icon} {status} |")
+        row = f"| {d.name} | {d.baseline_score:.2f} | {d.current_score:.2f}"
+        lines.append(f"{row} | {sign}{d.delta:.2f} | {icon} {status} |")
 
     sign = "+" if result.overall_delta > 0 else ""
     overall_icon = "🔴" if result.has_regression else "🟢"
@@ -160,6 +162,7 @@ def format_judge_ci(
     overall_icon = "✅" if passed else "❌"
     overall_status = "PASS" if passed else "FAIL"
     lines.append("")
-    lines.append(f"**Overall: {result.overall_score:.0%} — {overall_icon} {overall_status}** (threshold: {threshold:.0%})")
+    overall = f"**Overall: {result.overall_score:.0%} — {overall_icon} {overall_status}**"
+    lines.append(f"{overall} (threshold: {threshold:.0%})")
 
     return "\n".join(lines)

@@ -306,7 +306,8 @@ class TestParameterFlowThrough:
         ])
         data_tight = json.loads(result_tight.output)
         data_loose = json.loads(result_loose.output)
-        assert data_tight["has_regression"] is True or data_loose["has_regression"] is False
+        assert data_tight["has_regression"] is True
+        assert data_loose["has_regression"] is False
 
     def test_recovery_window_affects_score(self):
         runner = CliRunner()
@@ -328,8 +329,10 @@ class TestParameterFlowThrough:
         long_recovery = next(
             (m for m in data_long["metrics"] if m["name"] == "error_recovery"), None
         )
-        if short_recovery and long_recovery:
-            assert short_recovery["score"] != long_recovery["score"] or True
+        assert short_recovery is not None, "error_recovery metric missing for recovery-window=1"
+        assert long_recovery is not None, "error_recovery metric missing for recovery-window=10"
+        assert short_recovery["details"]["recovery_window"] == 1
+        assert long_recovery["details"]["recovery_window"] == 10
 
 
 class TestVersionCommand:

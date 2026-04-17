@@ -286,7 +286,7 @@ def loop_detection(
                 })
 
     loops_found = _deduplicate_loops(raw_loops)
-    exact_patterns = {tuple(l["pattern"]) for l in loops_found}
+    exact_patterns = {tuple(lp["pattern"]) for lp in loops_found}
 
     repeated_positions: set[int] = set()
     for loop in loops_found:

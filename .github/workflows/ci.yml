@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths: ["trajeval/**", ".github/workflows/ci.yml"]
+  pull_request:
+    branches: [master]
+    paths: ["trajeval/**", ".github/workflows/ci.yml"]
+
+defaults:
+  run:
+    working-directory: trajeval
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check trajeval/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/ --tb=short -q --co -q 2>&1 | tail -1
+        name: Count tests
+      - run: pytest tests/ --tb=short --junitxml=results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-py${{ matrix.python-version }}
+          path: trajeval/results.xml
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: trajeval/dist/

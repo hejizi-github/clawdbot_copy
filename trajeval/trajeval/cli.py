@@ -11,12 +11,12 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .calibration import AnnotationStore, HumanAnnotation, load_judge_results, compute_correlation
+from .calibration import AnnotationStore, HumanAnnotation, compute_correlation, load_judge_results
+from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
 from .compare import compare_reports, format_markdown
+from .improvement import ImprovementReport, Priority, analyze_judge_results, analyze_results
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
-from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
-from .improvement import ImprovementReport, Priority, analyze_judge_results, analyze_results
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
 
 console = Console()
@@ -122,7 +122,10 @@ def eval(
     "--aggregation", type=click.Choice(["median", "mean"]), default="median",
     help="Aggregation method for ensemble scoring (default median)",
 )
-def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold: float, no_randomize: bool, judges: int, aggregation: str):
+def judge_cmd(
+    trace_file: Path, model: str, fmt: str, dimensions: str,
+    threshold: float, no_randomize: bool, judges: int, aggregation: str,
+):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
         trace = ingest_json(trace_file)
@@ -459,13 +462,19 @@ def _print_improvement_report(report):
     if report.findings:
         console.print(f"\n[bold]Findings ({len(report.findings)})[/bold]")
         for f in report.findings:
-            icon = "[red]●[/red]" if f.severity == Priority.HIGH else "[yellow]●[/yellow]" if f.severity == Priority.MEDIUM else "[dim]●[/dim]"
+            sev = f.severity
+            icon = "[red]●[/red]" if sev == Priority.HIGH else (
+                "[yellow]●[/yellow]" if sev == Priority.MEDIUM else "[dim]●[/dim]"
+            )
             console.print(f"  {icon} [{f.severity.value}] {f.metric}: {f.evidence}")
 
     if report.recommendations:
         console.print(f"\n[bold]Recommendations ({len(report.recommendations)})[/bold]")
         for i, r in enumerate(report.recommendations, 1):
-            icon = "[red]![/red]" if r.priority == Priority.HIGH else "[yellow]![/yellow]" if r.priority == Priority.MEDIUM else "[dim]![/dim]"
+            pri = r.priority
+            icon = "[red]![/red]" if pri == Priority.HIGH else (
+                "[yellow]![/yellow]" if pri == Priority.MEDIUM else "[dim]![/dim]"
+            )
             console.print(f"  {icon} {i}. {r.title}")
             console.print(f"     {r.suggestion}")
     else:

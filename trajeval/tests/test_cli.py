@@ -578,9 +578,9 @@ class TestAnnotateDefaultDimensions:
             "--output", str(out),
         ], input="5\n4\n3\n4\n5\n")
         assert result.exit_code == 0
-        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        lines = [ln for ln in out.read_text().splitlines() if ln.strip()]
         assert len(lines) == 5
-        dims_saved = [json.loads(l)["dimension"] for l in lines]
+        dims_saved = [json.loads(ln)["dimension"] for ln in lines]
         assert set(dims_saved) == set(ALL_DIMENSIONS)
 
 
@@ -755,7 +755,7 @@ class TestAnnotateCommand:
         ], input="4\n3\n")
         assert result.exit_code == 0
         assert "Saved 2 annotations" in result.output
-        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        lines = [ln for ln in out.read_text().splitlines() if ln.strip()]
         assert len(lines) == 2
         ann = json.loads(lines[0])
         assert ann["dimension"] == "task_completion"
@@ -771,7 +771,7 @@ class TestAnnotateCommand:
         ], input="9\n3\n")
         assert result.exit_code == 0
         assert "Score must be 0-5" in result.output
-        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        lines = [ln for ln in out.read_text().splitlines() if ln.strip()]
         assert len(lines) == 1
         ann = json.loads(lines[0])
         assert ann["human_score"] == 3

@@ -318,8 +318,8 @@ class TestFormatMarkdown:
         )
         md = format_markdown(result)
         lines = md.split("\n")
-        baseline_items = [i for i, l in enumerate(lines) if l.startswith("- a:")]
-        current_label = [i for i, l in enumerate(lines) if l == "**Current**:"]
+        baseline_items = [i for i, ln in enumerate(lines) if ln.startswith("- a:")]
+        current_label = [i for i, ln in enumerate(lines) if ln == "**Current**:"]
         assert len(baseline_items) >= 1
         assert len(current_label) == 1
         assert lines[current_label[0] - 1] == ""

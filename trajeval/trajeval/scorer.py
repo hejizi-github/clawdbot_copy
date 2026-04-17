@@ -6,7 +6,6 @@ import json
 import random
 import re
 import statistics
-
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -249,7 +248,9 @@ class EnsembleResult(BaseModel):
     dimension_stats: list[DimensionStat] = Field(default_factory=list)
 
 
-def _aggregate_dimensions(results: list[JudgeResult], aggregation: Literal["median", "mean"]) -> tuple[list[JudgeDimension], list[DimensionStat]]:
+def _aggregate_dimensions(
+    results: list[JudgeResult], aggregation: Literal["median", "mean"],
+) -> tuple[list[JudgeDimension], list[DimensionStat]]:
     """Aggregate dimension scores across multiple judge runs."""
     dim_scores: dict[str, list[int]] = {}
     dim_explanations: dict[str, list[str]] = {}

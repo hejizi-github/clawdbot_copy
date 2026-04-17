@@ -322,7 +322,7 @@ class TestRandomization:
         seen = set()
         for _ in range(50):
             prompt = build_user_prompt(sample_trace, dims, randomize_order=True)
-            lines = [l.strip() for l in prompt.split("\n") if l.strip().startswith("- ")]
+            lines = [ln.strip() for ln in prompt.split("\n") if ln.strip().startswith("- ")]
             first_dim = lines[0] if lines else ""
             seen.add(first_dim)
         assert len(seen) > 1, "Randomization should produce different orderings across 50 runs"
