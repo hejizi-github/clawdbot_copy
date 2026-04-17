@@ -179,15 +179,24 @@ class TestEvalCommand:
 
     def test_similarity_threshold_flag_changes_output(self):
         runner = CliRunner()
-        result = runner.invoke(main, [
+        exact_result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "loop_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        fuzzy_result = runner.invoke(main, [
             "eval", str(FIXTURES_DIR / "loop_trace.json"),
             "--format", "json", "--threshold", "0.1",
             "--similarity-threshold", "0.5",
         ])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        loop_m = next(m for m in data["metrics"] if m["name"] == "loop_detection")
-        assert loop_m is not None
+        assert exact_result.exit_code == 0
+        assert fuzzy_result.exit_code == 0
+        exact_data = json.loads(exact_result.output)
+        fuzzy_data = json.loads(fuzzy_result.output)
+        exact_loop = next(m for m in exact_data["metrics"] if m["name"] == "loop_detection")
+        fuzzy_loop = next(m for m in fuzzy_data["metrics"] if m["name"] == "loop_detection")
+        assert "near_loops_found" not in exact_loop["details"]
+        assert "near_loops_found" in fuzzy_loop["details"]
+        assert fuzzy_loop["score"] < exact_loop["score"]
 
 
 class TestFormatDetailsCompact:
@@ -408,6 +417,98 @@ class TestJudgeCommand:
         assert result.exit_code == 2
 
 
+class TestImproveCommand:
+    def test_json_output_with_good_results(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve", str(FIXTURES_DIR / "eval_result_good.json"), "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["num_evaluations"] == 1
+        assert "step_efficiency" in data["metric_summary"]
+        assert data["metric_summary"]["step_efficiency"]["mean_score"] == 0.9
+
+    def test_json_output_with_bad_results(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve",
+            str(FIXTURES_DIR / "eval_result_bad.json"),
+            str(FIXTURES_DIR / "eval_result_bad.json"),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["num_evaluations"] == 2
+        assert len(data["findings"]) > 0
+        assert len(data["recommendations"]) > 0
+        high_recs = [r for r in data["recommendations"] if r["priority"] == "high"]
+        assert len(high_recs) > 0
+
+    def test_table_output_runs(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve", str(FIXTURES_DIR / "eval_result_good.json"),
+        ])
+        assert result.exit_code == 0
+        assert "Improvement Analysis" in result.output
+        assert "Metric Summary" in result.output
+
+    def test_multiple_files(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve",
+            str(FIXTURES_DIR / "eval_result_good.json"),
+            str(FIXTURES_DIR / "eval_result_bad.json"),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["num_evaluations"] == 2
+
+    def test_no_recommendations_for_healthy_results(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve", str(FIXTURES_DIR / "eval_result_good.json"), "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["recommendations"]) == 0
+
+    def test_invalid_file_skipped_with_warning(self, tmp_path):
+        bad = tmp_path / "not_json.json"
+        bad.write_text("not valid json")
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve", str(bad), str(FIXTURES_DIR / "eval_result_good.json"),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        assert "skipping" in result.output.lower() or "Warning" in result.output
+
+    def test_all_invalid_files_exit_1(self, tmp_path):
+        bad = tmp_path / "garbage.json"
+        bad.write_text("{{{")
+        runner = CliRunner()
+        result = runner.invoke(main, ["improve", str(bad)])
+        assert result.exit_code == 1
+
+    def test_recommendations_are_actionable(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve",
+            str(FIXTURES_DIR / "eval_result_bad.json"),
+            str(FIXTURES_DIR / "eval_result_bad.json"),
+            str(FIXTURES_DIR / "eval_result_bad.json"),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        for rec in data["recommendations"]:
+            assert len(rec["suggestion"]) > 20, "Recommendations should be substantive"
+            assert rec["title"], "Recommendations must have a title"
+
+
 class TestAnnotateDefaultDimensions:
     def test_annotate_defaults_to_all_dimensions(self, tmp_path):
         out = tmp_path / "ann.jsonl"
@@ -576,6 +677,11 @@ class TestCompareCommand:
         fuzzy_data = json.loads(fuzzy.output)
         assert "metric_deltas" in exact_data
         assert "metric_deltas" in fuzzy_data
+        exact_loop = next(d for d in exact_data["metric_deltas"] if d["name"] == "loop_detection")
+        fuzzy_loop = next(d for d in fuzzy_data["metric_deltas"] if d["name"] == "loop_detection")
+        assert exact_loop["delta"] == 0.0, "Same trace should have zero delta"
+        assert fuzzy_loop["delta"] == 0.0, "Same trace should have zero delta"
+        assert exact_loop["baseline_score"] != fuzzy_loop["baseline_score"], "Different thresholds should produce different scores"
 
 
 class TestAnnotateCommand:

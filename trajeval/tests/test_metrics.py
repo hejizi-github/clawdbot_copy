@@ -805,10 +805,10 @@ class TestNearLoopDetection:
             ],
         )
         result = loop_detection(trace, ngram_sizes=[2], similarity_threshold=0.5)
-        if "near_loops_found" in result.details:
-            for near in result.details["near_loops_found"]:
-                pattern = tuple(near["pattern"])
-                assert pattern <= tuple(["Z", "B"]), "Representative should be lexicographic min"
+        assert "near_loops_found" in result.details, "Expected near loops with threshold 0.5"
+        for near in result.details["near_loops_found"]:
+            pattern = tuple(near["pattern"])
+            assert pattern <= tuple(["Z", "B"]), "Representative should be lexicographic min"
 
     def test_independent_near_clusters_both_kept(self):
         """Non-overlapping near-loop clusters should both survive dedup."""
@@ -826,6 +826,6 @@ class TestNearLoopDetection:
             ],
         )
         result = loop_detection(trace, ngram_sizes=[2], similarity_threshold=0.5)
-        if "near_loops_found" in result.details:
-            near = result.details["near_loops_found"]
-            assert len(near) >= 2, "Independent clusters should both be kept"
+        assert "near_loops_found" in result.details, "Expected near loops with threshold 0.5"
+        near = result.details["near_loops_found"]
+        assert len(near) >= 2, "Independent clusters should both be kept"

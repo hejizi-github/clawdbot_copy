@@ -16,6 +16,7 @@ from .compare import compare_reports, format_markdown
 from .ingester import IngestError, ingest_json
 from .metrics import MetricConfig, evaluate
 from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
+from .improvement import Priority, analyze_results
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, ensemble_judge, judge
 
 console = Console()
@@ -364,6 +365,80 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str, threshold:
 
     if threshold is not None:
         sys.exit(0 if passed else 1)
+
+
+@main.command()
+@click.argument("eval_files", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+def improve(eval_files: tuple[Path, ...], fmt: str):
+    """Analyze multiple evaluation results and suggest improvements."""
+    from .metrics import EvalReport
+
+    reports = []
+    for f in eval_files:
+        try:
+            data = json.loads(f.read_text())
+            reports.append(EvalReport(**data))
+        except Exception as e:
+            console.print(f"[yellow]Warning: skipping {f.name}: {e}[/yellow]")
+
+    if not reports:
+        console.print("[red]No valid evaluation results found[/red]")
+        sys.exit(1)
+
+    report = analyze_results(reports)
+
+    if fmt == "json":
+        click.echo(json.dumps(report.model_dump(), indent=2))
+    else:
+        _print_improvement_report(report)
+
+
+def _print_improvement_report(report):
+    console.print(f"\n[bold]Improvement Analysis[/bold] ({report.num_evaluations} evaluations)\n")
+
+    if report.metric_summary:
+        summary_table = Table(title="Metric Summary")
+        summary_table.add_column("Metric", style="cyan")
+        summary_table.add_column("Mean", justify="right")
+        summary_table.add_column("Fail Rate", justify="right")
+        summary_table.add_column("Std Dev", justify="right")
+        summary_table.add_column("Trend", justify="right")
+
+        for name, s in sorted(report.metric_summary.items()):
+            score_color = "green" if s["mean_score"] >= 0.7 else "yellow" if s["mean_score"] >= 0.5 else "red"
+            fail_color = "green" if s["fail_rate"] == 0 else "yellow" if s["fail_rate"] < 0.3 else "red"
+            trend_val = s.get("trend")
+            if trend_val is not None:
+                trend_color = "green" if trend_val > 0.05 else "red" if trend_val < -0.05 else "dim"
+                trend_str = f"[{trend_color}]{trend_val:+.2f}[/{trend_color}]"
+            else:
+                trend_str = "[dim]-[/dim]"
+            summary_table.add_row(
+                name,
+                f"[{score_color}]{s['mean_score']:.2f}[/{score_color}]",
+                f"[{fail_color}]{s['fail_rate']:.0%}[/{fail_color}]",
+                f"{s['std_dev']:.2f}",
+                trend_str,
+            )
+        console.print(summary_table)
+
+    if report.findings:
+        console.print(f"\n[bold]Findings ({len(report.findings)})[/bold]")
+        for f in report.findings:
+            icon = "[red]●[/red]" if f.severity == Priority.HIGH else "[yellow]●[/yellow]" if f.severity == Priority.MEDIUM else "[dim]●[/dim]"
+            console.print(f"  {icon} [{f.severity.value}] {f.metric}: {f.evidence}")
+
+    if report.recommendations:
+        console.print(f"\n[bold]Recommendations ({len(report.recommendations)})[/bold]")
+        for i, r in enumerate(report.recommendations, 1):
+            icon = "[red]![/red]" if r.priority == Priority.HIGH else "[yellow]![/yellow]" if r.priority == Priority.MEDIUM else "[dim]![/dim]"
+            console.print(f"  {icon} {i}. {r.title}")
+            console.print(f"     {r.suggestion}")
+    else:
+        console.print("\n[green]No actionable recommendations — all metrics look healthy![/green]")
+
+    console.print()
 
 
 def _print_calibration(result, threshold: float | None = None, passed: bool | None = None):
