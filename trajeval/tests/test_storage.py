@@ -7,6 +7,7 @@ import time
 import pytest
 
 from trajeval.metrics import EvalReport, MetricResult
+from trajeval.scorer import JudgeDimension, JudgeResult
 from trajeval.storage import TrajevalDB
 
 
@@ -188,3 +189,76 @@ class TestDBLifecycle:
         with TrajevalDB(tmp_path / "test.db") as db:
             db.save_eval(_make_report(), agent_name="a")
             assert db.count() == 1
+
+
+def _make_judge_result(
+    trace_id: str = "judge-001",
+    score: float = 0.7,
+    model: str = "claude-sonnet-4-6",
+) -> JudgeResult:
+    return JudgeResult(
+        trace_id=trace_id,
+        dimensions=[
+            JudgeDimension(name="task_completion", score=4, explanation="Good"),
+            JudgeDimension(name="reasoning_quality", score=3, explanation="OK"),
+        ],
+        overall_score=score,
+        model=model,
+    )
+
+
+class TestJudgeSaveAndList:
+    def test_save_returns_id(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            row_id = db.save_judge(_make_judge_result(), agent_name="a", passed=True)
+        assert isinstance(row_id, int)
+        assert row_id >= 1
+
+    def test_roundtrip_via_list(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_judge(_make_judge_result(), agent_name="bot", passed=True)
+            results = db.list_judges()
+        assert len(results) == 1
+        assert results[0].trace_id == "judge-001"
+        assert results[0].model == "claude-sonnet-4-6"
+        assert len(results[0].dimensions) == 2
+        assert results[0].dimensions[0].name == "task_completion"
+        assert results[0].dimensions[0].score == 4
+
+    def test_filter_by_model(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_judge(_make_judge_result(trace_id="t1", model="claude-sonnet-4-6"), passed=True)
+            db.save_judge(_make_judge_result(trace_id="t2", model="gpt-4o"), passed=True)
+            results = db.list_judges(model="gpt-4o")
+        assert len(results) == 1
+        assert results[0].model == "gpt-4o"
+
+    def test_filter_by_agent(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_judge(_make_judge_result(trace_id="t1"), agent_name="alpha", passed=True)
+            db.save_judge(_make_judge_result(trace_id="t2"), agent_name="beta", passed=True)
+            results = db.list_judges(agent_name="alpha")
+        assert len(results) == 1
+        assert results[0].trace_id == "t1"
+
+    def test_filter_failed_only(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_judge(_make_judge_result(trace_id="t1"), passed=True)
+            db.save_judge(_make_judge_result(trace_id="t2"), passed=False)
+            results = db.list_judges(failed_only=True)
+        assert len(results) == 1
+        assert results[0].trace_id == "t2"
+
+    def test_count_judges(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            assert db.count_judges() == 0
+            db.save_judge(_make_judge_result(trace_id="t1"), passed=True)
+            db.save_judge(_make_judge_result(trace_id="t2"), passed=False)
+            assert db.count_judges() == 2
+
+    def test_judge_and_eval_independent(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(), agent_name="a")
+            db.save_judge(_make_judge_result(), agent_name="a", passed=True)
+            assert db.count() == 1
+            assert db.count_judges() == 1

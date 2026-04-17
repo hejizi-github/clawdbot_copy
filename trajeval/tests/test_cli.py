@@ -1208,7 +1208,6 @@ class TestHistoryCommand:
         result = runner.invoke(main, ["history", "--db", str(db_path)])
         assert result.exit_code == 0
         assert "trace-002" in result.output
-        assert "3 results" in result.output
 
     def test_history_json_output(self, tmp_path):
         db_path = tmp_path / "hist.db"
@@ -1217,8 +1216,8 @@ class TestHistoryCommand:
         result = runner.invoke(main, ["history", "--db", str(db_path), "--format", "json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert len(data) == 3
-        assert data[0]["trace_id"] == "trace-002"
+        assert len(data["eval_results"]) == 3
+        assert data["eval_results"][0]["trace_id"] == "trace-002"
 
     def test_history_filter_by_agent(self, tmp_path):
         db_path = tmp_path / "hist.db"
@@ -1236,7 +1235,7 @@ class TestHistoryCommand:
             "history", "--db", str(db_path), "--agent", "test-agent", "--format", "json",
         ])
         data = json.loads(result.output)
-        assert len(data) == 3
+        assert len(data["eval_results"]) == 3
 
     def test_history_limit(self, tmp_path):
         db_path = tmp_path / "hist.db"
@@ -1246,14 +1245,14 @@ class TestHistoryCommand:
             "history", "--db", str(db_path), "--limit", "2", "--format", "json",
         ])
         data = json.loads(result.output)
-        assert len(data) == 2
+        assert len(data["eval_results"]) == 2
 
     def test_history_empty_db(self, tmp_path):
         db_path = tmp_path / "hist.db"
         runner = CliRunner()
         result = runner.invoke(main, ["history", "--db", str(db_path)])
         assert result.exit_code == 0
-        assert "No evaluation history" in result.output
+        assert "No results found" in result.output
 
 
 class TestOtlpInputFormat:

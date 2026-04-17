@@ -248,9 +248,18 @@ def batch(
     "--aggregation", type=click.Choice(["median", "mean"]), default="median",
     help="Aggregation method for ensemble scoring (default median)",
 )
+@click.option(
+    "--save", is_flag=True, default=False,
+    help="Persist judge result to local SQLite history",
+)
+@click.option(
+    "--db", type=click.Path(path_type=Path), default=None,
+    help=f"SQLite database path (default: {DEFAULT_DB_PATH})",
+)
 def judge_cmd(
     trace_file: Path, model: str, fmt: str, input_fmt: str, dimensions: str,
     threshold: float, no_randomize: bool, judges: int, aggregation: str,
+    save: bool, db: Path | None,
 ):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
@@ -279,6 +288,11 @@ def judge_cmd(
         sys.exit(1)
 
     passed = result.overall_score >= threshold
+
+    if save:
+        with TrajevalDB(db) as store:
+            store.save_judge(result, agent_name=trace.agent_name, passed=passed)
+            click.echo(f"Saved to {store.path}", err=True)
 
     if fmt == "json":
         output = {
@@ -566,6 +580,78 @@ def improve(eval_files: tuple[Path, ...], fmt: str, judge_files: tuple[Path, ...
         click.echo(json.dumps(merged.model_dump(), indent=2))
     else:
         _print_improvement_report(merged)
+
+
+@main.command()
+@click.option(
+    "--db", type=click.Path(path_type=Path), default=None,
+    help=f"SQLite database path (default: {DEFAULT_DB_PATH})",
+)
+@click.option(
+    "--type", "result_type", type=click.Choice(["eval", "judge", "all"]),
+    default="all", help="Type of results to show",
+)
+@click.option("--agent", default=None, help="Filter by agent name")
+@click.option("--limit", type=click.IntRange(min=1), default=20, help="Max results to show")
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+def history(db: Path | None, result_type: str, agent: str | None, limit: int, fmt: str):
+    """View past evaluation and judge results from the local database."""
+    with TrajevalDB(db) as store:
+        evals = []
+        judges = []
+        if result_type in ("eval", "all"):
+            evals = store.list_evals(agent_name=agent, limit=limit)
+        if result_type in ("judge", "all"):
+            judges = store.list_judges(agent_name=agent, limit=limit)
+
+    if fmt == "json":
+        output = {
+            "eval_results": [
+                {"trace_id": e.trace_id, "score": e.overall_score, "passed": e.passed, "timestamp": e.timestamp}
+                for e in evals
+            ],
+            "judge_results": [
+                {"trace_id": j.trace_id, "score": j.overall_score, "model": j.model}
+                for j in judges
+            ],
+        }
+        click.echo(json.dumps(output, indent=2))
+        return
+
+    from datetime import datetime, timezone
+
+    if evals:
+        table = Table(title=f"Eval History ({len(evals)})")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Score", justify="right")
+        table.add_column("Status", justify="center")
+        table.add_column("Time", style="dim")
+        for e in evals:
+            score_style = "green" if e.passed else "red"
+            status = "[green]PASS[/green]" if e.passed else "[red]FAIL[/red]"
+            ts = datetime.fromtimestamp(e.timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+            table.add_row(
+                e.trace_id[:20],
+                f"[{score_style}]{e.overall_score:.2f}[/{score_style}]",
+                status, ts,
+            )
+        console.print(table)
+
+    if judges:
+        table = Table(title=f"Judge History ({len(judges)})")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Model", style="dim")
+        table.add_column("Score", justify="right")
+        for j in judges:
+            score_color = "green" if j.overall_score >= 0.7 else "yellow" if j.overall_score >= 0.5 else "red"
+            table.add_row(
+                j.trace_id[:20], j.model,
+                f"[{score_color}]{j.overall_score:.0%}[/{score_color}]",
+            )
+        console.print(table)
+
+    if not evals and not judges:
+        console.print("[dim]No results found.[/dim]")
 
 
 def _print_improvement_report(report):
@@ -868,61 +954,6 @@ def _print_report(trace, report, show_details: bool = False):
         overall_row.append("")
     scores.add_row(*overall_row)
     console.print(scores)
-
-
-@main.command()
-@click.option("--agent", default=None, help="Filter by agent name")
-@click.option("--limit", type=int, default=20, help="Maximum results to show (default 20)")
-@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
-@click.option(
-    "--db", type=click.Path(path_type=Path), default=None,
-    help=f"SQLite database path (default: {DEFAULT_DB_PATH})",
-)
-def history(agent: str | None, limit: int, fmt: str, db: Path | None):
-    """List saved evaluation results from local history."""
-    store = TrajevalDB(db)
-    try:
-        evals = store.list_evals(agent_name=agent, limit=limit)
-    finally:
-        store.close()
-
-    if not evals:
-        console.print("[dim]No evaluation history found.[/dim]")
-        return
-
-    if fmt == "json":
-        rows = []
-        for e in evals:
-            rows.append({
-                "trace_id": e.trace_id,
-                "overall_score": e.overall_score,
-                "passed": e.passed,
-                "timestamp": e.timestamp,
-                "num_metrics": len(e.metrics),
-            })
-        click.echo(json.dumps(rows, indent=2))
-    else:
-        import datetime
-
-        table = Table(title=f"Evaluation History ({len(evals)} results)")
-        table.add_column("Trace ID", style="cyan")
-        table.add_column("Score", justify="right")
-        table.add_column("Status", justify="center")
-        table.add_column("Metrics", justify="right")
-        table.add_column("Date", style="dim")
-
-        for e in evals:
-            status = "[green]PASS[/green]" if e.passed else "[red]FAIL[/red]"
-            score_style = "green" if e.passed else "red"
-            ts = datetime.datetime.fromtimestamp(e.timestamp).strftime("%Y-%m-%d %H:%M") if e.timestamp else "-"
-            table.add_row(
-                e.trace_id[:24],
-                f"[{score_style}]{e.overall_score:.2f}[/{score_style}]",
-                status,
-                str(len(e.metrics)),
-                ts,
-            )
-        console.print(table)
 
 
 def _print_batch_report(result: BatchResult):

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .metrics import EvalReport, MetricResult
+from .scorer import JudgeResult
 
 
 DEFAULT_DB_DIR = Path.home() / ".trajeval"
@@ -26,6 +27,22 @@ CREATE TABLE IF NOT EXISTS eval_results (
 
 CREATE INDEX IF NOT EXISTS idx_eval_agent_ts
     ON eval_results (agent_name, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS judge_results (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id    TEXT NOT NULL,
+    agent_name  TEXT NOT NULL DEFAULT 'unknown',
+    timestamp   REAL NOT NULL,
+    overall_score REAL NOT NULL,
+    passed      INTEGER NOT NULL,
+    model       TEXT NOT NULL DEFAULT '',
+    result_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_judge_agent_ts
+    ON judge_results (agent_name, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_judge_model
+    ON judge_results (model);
 """
 
 
@@ -108,6 +125,57 @@ class TrajevalDB:
             row = self._conn.execute("SELECT COUNT(*) FROM eval_results").fetchone()
         return row[0]
 
+    def save_judge(
+        self,
+        result: JudgeResult,
+        agent_name: str = "unknown",
+        passed: bool = False,
+    ) -> int:
+        ts = time.time()
+        result_json = result.model_dump_json()
+        cursor = self._conn.execute(
+            "INSERT INTO judge_results (trace_id, agent_name, timestamp, overall_score, passed, model, result_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (result.trace_id, agent_name, ts, result.overall_score, int(passed), result.model, result_json),
+        )
+        self._conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def list_judges(
+        self,
+        *,
+        agent_name: str | None = None,
+        model: str | None = None,
+        failed_only: bool = False,
+        limit: int = 50,
+    ) -> list[JudgeResult]:
+        clauses = []
+        params: list = []
+        if agent_name:
+            clauses.append("agent_name = ?")
+            params.append(agent_name)
+        if model:
+            clauses.append("model = ?")
+            params.append(model)
+        if failed_only:
+            clauses.append("passed = 0")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM judge_results {where} ORDER BY timestamp DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+        return [_row_to_judge(r) for r in rows]
+
+    def count_judges(self, agent_name: str | None = None) -> int:
+        if agent_name:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM judge_results WHERE agent_name = ?",
+                (agent_name,),
+            ).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) FROM judge_results").fetchone()
+        return row[0]
+
 
 def _row_to_report(row: sqlite3.Row) -> EvalReport:
     metrics = [MetricResult(**m) for m in json.loads(row["metrics_json"])]
@@ -118,3 +186,7 @@ def _row_to_report(row: sqlite3.Row) -> EvalReport:
         passed=bool(row["passed"]),
         timestamp=row["timestamp"],
     )
+
+
+def _row_to_judge(row: sqlite3.Row) -> JudgeResult:
+    return JudgeResult.model_validate_json(row["result_json"])
