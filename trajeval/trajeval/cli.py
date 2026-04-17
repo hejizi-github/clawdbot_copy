@@ -15,7 +15,7 @@ from .calibration import AnnotationStore, HumanAnnotation, compute_correlation, 
 from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
 from .compare import compare_reports, format_markdown
 from .improvement import ImprovementReport, Priority, analyze_judge_results, analyze_results
-from .ingester import IngestError, ingest_json
+from .ingester import IngestError, ingest_clawdbot_jsonl, ingest_json
 from .metrics import MetricConfig, evaluate
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
 
@@ -28,9 +28,29 @@ def main():
     """trajeval — framework-agnostic agent trajectory evaluation."""
 
 
+def _resolve_input_format(trace_file: Path, input_fmt: str) -> str:
+    """Resolve 'auto' format by inspecting the file."""
+    if input_fmt != "auto":
+        return input_fmt
+    if trace_file.suffix == ".jsonl":
+        return "clawdbot"
+    return "json"
+
+
+def _load_trace(trace_file: Path, input_format: str):
+    if input_format == "clawdbot":
+        return ingest_clawdbot_jsonl(trace_file)
+    return ingest_json(trace_file)
+
+
 @main.command()
 @click.argument("trace_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--format", "fmt", type=click.Choice(["table", "json", "ci"]), default="table")
+@click.option(
+    "--input-format", "input_fmt",
+    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
+)
 @click.option("--expected-steps", type=int, default=None, help="Baseline step count for efficiency")
 @click.option(
     "--baseline-tokens", type=int, default=None, help="Baseline token count for efficiency"
@@ -57,6 +77,7 @@ def main():
 def eval(
     trace_file: Path,
     fmt: str,
+    input_fmt: str,
     expected_steps: int | None,
     baseline_tokens: int | None,
     threshold: float,
@@ -67,7 +88,8 @@ def eval(
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
-        trace = ingest_json(trace_file)
+        resolved_fmt = _resolve_input_format(trace_file, input_fmt)
+        trace = _load_trace(trace_file, resolved_fmt)
     except IngestError as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
@@ -103,6 +125,11 @@ def eval(
 @click.option("--model", default="claude-sonnet-4-6", help="Model for LLM judge")
 @click.option("--format", "fmt", type=click.Choice(["table", "json", "ci"]), default="table")
 @click.option(
+    "--input-format", "input_fmt",
+    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
+)
+@click.option(
     "--dimensions",
     default=",".join(ALL_DIMENSIONS),
     help="Comma-separated dimensions to evaluate",
@@ -123,12 +150,13 @@ def eval(
     help="Aggregation method for ensemble scoring (default median)",
 )
 def judge_cmd(
-    trace_file: Path, model: str, fmt: str, dimensions: str,
+    trace_file: Path, model: str, fmt: str, input_fmt: str, dimensions: str,
     threshold: float, no_randomize: bool, judges: int, aggregation: str,
 ):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
-        trace = ingest_json(trace_file)
+        resolved_fmt = _resolve_input_format(trace_file, input_fmt)
+        trace = _load_trace(trace_file, resolved_fmt)
     except IngestError as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
@@ -188,6 +216,11 @@ def judge_cmd(
     "--format", "fmt", type=click.Choice(["table", "json", "markdown", "ci"]), default="table"
 )
 @click.option(
+    "--input-format", "input_fmt",
+    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
+)
+@click.option(
     "--tolerance",
     type=float,
     default=0.05,
@@ -220,6 +253,7 @@ def compare(
     baseline_file: Path,
     current_file: Path,
     fmt: str,
+    input_fmt: str,
     tolerance: float,
     expected_steps: int | None,
     baseline_tokens: int | None,
@@ -231,8 +265,10 @@ def compare(
 ):
     """Compare two traces and detect metric regressions."""
     try:
-        baseline_trace = ingest_json(baseline_file)
-        current_trace = ingest_json(current_file)
+        baseline_fmt = _resolve_input_format(baseline_file, input_fmt)
+        current_fmt = _resolve_input_format(current_file, input_fmt)
+        baseline_trace = _load_trace(baseline_file, baseline_fmt)
+        current_trace = _load_trace(current_file, current_fmt)
     except IngestError as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
@@ -277,15 +313,21 @@ def compare(
     default="annotations.jsonl", help="Annotations output file (JSONL)",
 )
 @click.option(
+    "--input-format", "input_fmt",
+    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
+)
+@click.option(
     "--dimensions",
     default=",".join(ALL_DIMENSIONS),
     help="Comma-separated dimensions to annotate",
 )
 @click.option("--annotator", default="default", help="Annotator identifier")
-def annotate(trace_file: Path, output: Path, dimensions: str, annotator: str):
+def annotate(trace_file: Path, output: Path, input_fmt: str, dimensions: str, annotator: str):
     """Interactively annotate a trace with human scores."""
     try:
-        trace = ingest_json(trace_file)
+        resolved_fmt = _resolve_input_format(trace_file, input_fmt)
+        trace = _load_trace(trace_file, resolved_fmt)
     except IngestError as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
