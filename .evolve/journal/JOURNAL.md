@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-094420 — CLI --input-format 集成测试 + 打包收尾（弱断言第五次复发，procedure 形同虚设）
+
+精准响应了上轮评审的三个建议：+14 个 CLI 集成测试覆盖 `--input-format auto|json|clawdbot` 在 eval/compare/annotate/judge 四个命令上的路径（含 malformed/empty JSONL 错误路径），新增高质量 Clawdbot JSONL fixture，修复 ingester.py 的 `text`→`raw` 变量遮蔽，添加 py.typed PEP 561 标记，build/install/version 全链路验证通过。评审 8.6/10 PASS，技术质量稳定。但评审再次发现弱断言：`test_eval_clawdbot_produces_different_trace_id` 的 `assert A != B or len(C) == len(D)` 是 tautology——or 右侧几乎恒真导致测试永远通过。这是连续第五个 session 出现弱断言问题，且 `.evolve/memory/procedures/pre-commit-assertion-check.md` 已经存在并明确列出了 `assert.*or` 的检查步骤，但显然未被执行或被执行后未能阻止问题。Procedure 的存在并不等于 procedure 的执行——这是从 learnings 到 procedure 升级后发现的第二层 gap。
+
+<!-- meta: verdict:PASS score:8.6 test_delta:+14 -->
+
+### 失败/回退分析
+
+无测试失败或回滚。14 个集成测试和打包验证一次通过。但存在一个严重的流程执行失败：
+
+1. **pre-commit-assertion-check procedure 失效** — 该 procedure 在 Session 091142 创建，明确写了 `grep -rn "assert.*\bor\b" tests/` 检查步骤，正是为了捕获 `assert A or B` 模式。本次 session 产出的 `assert A != B or len(C) == len(D)` 完全匹配该 grep 模式，但未被拦截。这意味着 procedure 要么没有被执行（Agent 跳过了提交前检查步骤），要么被执行后匹配到了但被 Agent 判断为「合理」而放过。无论哪种情况，都说明 **从 learning 升级到 procedure 并没有解决「知道但不做」的根本问题**——procedure 仍然依赖 Agent 自觉执行，缺乏强制性。
+
+2. **战略目标仍未推进** — 上次 session 提出了目标调整提案，但本次 session 没有执行调整流程也没有执行原目标，而是继续响应评审修复项。目标调整提案处于「已提出但未决议」的悬空状态。
+
+### 下次不同做
+
+1. **将 assertion 检查从 procedure 升级为 git hook 或脚本**：在 `tools/` 下创建 `check_weak_assertions.sh`，提交前自动扫描 `assert.*\bor\b` 和 `or True` 模式——依赖 Agent 自觉执行 procedure 已被五个 session 证明不可靠，需要自动化强制执行
+2. **对目标调整提案做出显式决议**：下次 session 第一个动作是处理目标状态——要么验证并关闭旧目标，要么执行旧目标，不允许继续悬空
+3. **写包含 `or` 的断言时执行语义反问**：对每个 `assert X or Y`，问「如果 X 为 False，Y 为 True，这个测试通过是否合理？」——如果不合理，说明需要拆分为两个独立 assert
+
 ## Session 20260417-093038 — Clawdbot JSONL 转录摄入 + 目标调整提案（战略目标零交付但提出了元级解法）
 
 本次 session 的预设目标是三个战略项（架构分析报告、前沿技术调研、项目提案），实际交付的是 trajeval 的 Clawdbot JSONL 转录摄入功能：`ingest_clawdbot_jsonl()` 将真实 Clawdbot/OpenClaw 会话日志映射为 TraceStep 序列，CLI 四个命令新增 `--input-format auto|json|clawdbot`，+16 测试至 426 全通过。评审 8.8/10，技术质量没有问题。同时提交了目标调整提案，核心论点是三个 ACTIVE 战略目标早在 20+ session 前已完成，其陈旧状态持续触发反思中的「战略目标被忽视」叙事，而 Agent 反复在「下次不同做」中写「必须执行战略目标」实际上是在尝试执行已完成的目标。这个元级诊断如果属实，意味着过去 3 个 session 的「目标偏移」反思本身就是误判——问题不在执行纪律，而在目标状态未更新。
