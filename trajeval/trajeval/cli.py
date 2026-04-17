@@ -18,6 +18,7 @@ from .improvement import ImprovementReport, Priority, analyze_judge_results, ana
 from .ingester import IngestError, ingest_clawdbot_jsonl, ingest_json
 from .metrics import MetricConfig, evaluate
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
+from .storage import ResultStore
 
 console = Console()
 
@@ -74,6 +75,10 @@ def _load_trace(trace_file: Path, input_format: str):
     "--details", is_flag=True, default=False,
     help="Show metric details in table output",
 )
+@click.option(
+    "--store", "store_path", type=click.Path(path_type=Path), default=None,
+    help="Save result to SQLite database at this path (creates if missing)",
+)
 def eval(
     trace_file: Path,
     fmt: str,
@@ -85,6 +90,7 @@ def eval(
     latency_budget: float | None,
     similarity_threshold: float,
     details: bool,
+    store_path: Path | None,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
@@ -103,6 +109,10 @@ def eval(
         pass_threshold=threshold,
     )
     report = evaluate(trace, config)
+
+    if store_path is not None:
+        with ResultStore(store_path) as store:
+            store.save_eval(report, agent_name=trace.agent_name)
 
     if fmt == "json":
         result = {
@@ -149,9 +159,14 @@ def eval(
     "--aggregation", type=click.Choice(["median", "mean"]), default="median",
     help="Aggregation method for ensemble scoring (default median)",
 )
+@click.option(
+    "--store", "store_path", type=click.Path(path_type=Path), default=None,
+    help="Save result to SQLite database at this path (creates if missing)",
+)
 def judge_cmd(
     trace_file: Path, model: str, fmt: str, input_fmt: str, dimensions: str,
     threshold: float, no_randomize: bool, judges: int, aggregation: str,
+    store_path: Path | None,
 ):
     """Evaluate an agent trace using an LLM-as-judge."""
     try:
@@ -180,6 +195,10 @@ def judge_cmd(
         sys.exit(1)
 
     passed = result.overall_score >= threshold
+
+    if store_path is not None:
+        with ResultStore(store_path) as store:
+            store.save_judge(result, agent_name=trace.agent_name, passed=passed)
 
     if fmt == "json":
         output = {
@@ -467,6 +486,90 @@ def improve(eval_files: tuple[Path, ...], fmt: str, judge_files: tuple[Path, ...
         click.echo(json.dumps(merged.model_dump(), indent=2))
     else:
         _print_improvement_report(merged)
+
+
+@main.command()
+@click.option(
+    "--db", "db_path", type=click.Path(exists=True, path_type=Path),
+    default="trajeval.db", help="Path to SQLite database",
+)
+@click.option(
+    "--type", "result_type", type=click.Choice(["eval", "judge", "all"]),
+    default="all", help="Type of results to show",
+)
+@click.option("--agent", default=None, help="Filter by agent name")
+@click.option("--failed-only", is_flag=True, default=False, help="Show only failed evaluations")
+@click.option("--limit", type=click.IntRange(min=1), default=20, help="Max results to show")
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+def history(db_path: Path, result_type: str, agent: str | None, failed_only: bool, limit: int, fmt: str):
+    """View past evaluation results from the local database."""
+    with ResultStore(db_path) as store:
+        evals = []
+        judges = []
+        if result_type in ("eval", "all"):
+            evals = store.list_evals(agent_name=agent, failed_only=failed_only, limit=limit)
+        if result_type in ("judge", "all"):
+            judges = store.list_judges(agent_name=agent, failed_only=failed_only, limit=limit)
+
+    if fmt == "json":
+        output = {
+            "eval_results": [
+                {"id": e.id, "trace_id": e.trace_id, "agent": e.agent_name,
+                 "score": e.overall_score, "passed": e.passed, "timestamp": e.timestamp}
+                for e in evals
+            ],
+            "judge_results": [
+                {"id": j.id, "trace_id": j.trace_id, "agent": j.agent_name,
+                 "score": j.overall_score, "passed": j.passed, "model": j.model, "timestamp": j.timestamp}
+                for j in judges
+            ],
+        }
+        click.echo(json.dumps(output, indent=2))
+        return
+
+    from datetime import datetime, timezone
+
+    if evals:
+        table = Table(title=f"Eval Results ({len(evals)})")
+        table.add_column("ID", style="dim", justify="right")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Agent")
+        table.add_column("Score", justify="right")
+        table.add_column("Status", justify="center")
+        table.add_column("Time", style="dim")
+        for e in evals:
+            score_style = "green" if e.passed else "red"
+            status = "[green]PASS[/green]" if e.passed else "[red]FAIL[/red]"
+            ts = datetime.fromtimestamp(e.timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+            table.add_row(
+                str(e.id), e.trace_id[:20], e.agent_name,
+                f"[{score_style}]{e.overall_score:.2f}[/{score_style}]",
+                status, ts,
+            )
+        console.print(table)
+
+    if judges:
+        table = Table(title=f"Judge Results ({len(judges)})")
+        table.add_column("ID", style="dim", justify="right")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Agent")
+        table.add_column("Model", style="dim")
+        table.add_column("Score", justify="right")
+        table.add_column("Status", justify="center")
+        table.add_column("Time", style="dim")
+        for j in judges:
+            score_style = "green" if j.passed else "red"
+            status = "[green]PASS[/green]" if j.passed else "[red]FAIL[/red]"
+            ts = datetime.fromtimestamp(j.timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+            table.add_row(
+                str(j.id), j.trace_id[:20], j.agent_name, j.model,
+                f"[{score_style}]{j.overall_score:.2f}[/{score_style}]",
+                status, ts,
+            )
+        console.print(table)
+
+    if not evals and not judges:
+        console.print("[dim]No results found.[/dim]")
 
 
 def _print_improvement_report(report):

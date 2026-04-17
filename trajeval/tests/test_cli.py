@@ -1136,3 +1136,149 @@ class TestInputFormat:
         result = runner.invoke(main, ["eval", str(empty)])
         assert result.exit_code == 1
         assert "Error" in result.output
+
+
+class TestEvalStoreFlag:
+    def test_eval_store_creates_db(self, tmp_path):
+        db = tmp_path / "results.db"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3", "--store", str(db),
+        ])
+        assert result.exit_code == 0
+        assert db.exists()
+
+    def test_eval_store_persists_result(self, tmp_path):
+        from trajeval.storage import ResultStore
+        db = tmp_path / "results.db"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3", "--store", str(db),
+        ])
+        with ResultStore(db) as store:
+            evals = store.list_evals()
+            assert len(evals) == 1
+            assert evals[0].passed is True
+            assert evals[0].overall_score > 0
+
+    def test_eval_store_multiple_runs_accumulate(self, tmp_path):
+        from trajeval.storage import ResultStore
+        db = tmp_path / "results.db"
+        runner = CliRunner()
+        for _ in range(3):
+            runner.invoke(main, [
+                "eval", str(FIXTURES_DIR / "simple_trace.json"),
+                "--threshold", "0.3", "--store", str(db),
+            ])
+        with ResultStore(db) as store:
+            assert store.count("eval") == 3
+
+
+class TestJudgeStoreFlag:
+    def test_judge_store_creates_db(self, tmp_path):
+        db = tmp_path / "results.db"
+        mock_result = JudgeResult(
+            trace_id="t1", overall_score=0.8, model="test-model",
+            dimensions=[JudgeDimension(name="task_completion", score=4, explanation="Good")],
+        )
+        runner = CliRunner()
+        with patch("trajeval.cli.judge", return_value=mock_result):
+            result = runner.invoke(main, [
+                "judge", str(FIXTURES_DIR / "simple_trace.json"),
+                "--store", str(db),
+            ])
+        assert result.exit_code == 0
+        assert db.exists()
+
+    def test_judge_store_persists_result(self, tmp_path):
+        from trajeval.storage import ResultStore
+        db = tmp_path / "results.db"
+        mock_result = JudgeResult(
+            trace_id="t1", overall_score=0.8, model="test-model",
+            dimensions=[JudgeDimension(name="task_completion", score=4, explanation="Good")],
+        )
+        runner = CliRunner()
+        with patch("trajeval.cli.judge", return_value=mock_result):
+            runner.invoke(main, [
+                "judge", str(FIXTURES_DIR / "simple_trace.json"),
+                "--store", str(db),
+            ])
+        with ResultStore(db) as store:
+            judges = store.list_judges()
+            assert len(judges) == 1
+            assert judges[0].model == "test-model"
+            assert judges[0].passed is True
+
+
+class TestHistoryCommand:
+    def test_history_empty_db(self, tmp_path):
+        from trajeval.storage import ResultStore
+        db = tmp_path / "empty.db"
+        with ResultStore(db):
+            pass
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", str(db)])
+        assert result.exit_code == 0
+        assert "No results found" in result.output
+
+    def test_history_shows_evals(self, tmp_path):
+        from trajeval.metrics import EvalReport, MetricResult
+        from trajeval.storage import ResultStore
+        db = tmp_path / "hist.db"
+        with ResultStore(db) as store:
+            store.save_eval(EvalReport(
+                trace_id="hist-001", overall_score=0.85, passed=True,
+                metrics=[MetricResult(name="m", score=0.85, passed=True)],
+                timestamp=1700000000.0,
+            ), agent_name="my-agent")
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", str(db)])
+        assert result.exit_code == 0
+        assert "hist-001" in result.output
+        assert "my-agent" in result.output
+
+    def test_history_json_format(self, tmp_path):
+        from trajeval.metrics import EvalReport, MetricResult
+        from trajeval.storage import ResultStore
+        db = tmp_path / "hist.db"
+        with ResultStore(db) as store:
+            store.save_eval(EvalReport(
+                trace_id="json-001", overall_score=0.9, passed=True,
+                metrics=[MetricResult(name="m", score=0.9, passed=True)],
+                timestamp=1700000000.0,
+            ), agent_name="a")
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", str(db), "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["eval_results"]) == 1
+        assert data["eval_results"][0]["trace_id"] == "json-001"
+
+    def test_history_filter_type_eval(self, tmp_path):
+        from trajeval.metrics import EvalReport, MetricResult
+        from trajeval.storage import ResultStore
+        db = tmp_path / "hist.db"
+        with ResultStore(db) as store:
+            store.save_eval(EvalReport(
+                trace_id="e1", overall_score=0.8, passed=True,
+                metrics=[MetricResult(name="m", score=0.8, passed=True)],
+                timestamp=1700000000.0,
+            ))
+            store.save_judge(JudgeResult(
+                trace_id="j1", overall_score=0.7, model="test",
+                dimensions=[JudgeDimension(name="d", score=3)],
+            ), passed=True)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "history", "--db", str(db), "--type", "eval", "--format", "json",
+        ])
+        data = json.loads(result.output)
+        assert len(data["eval_results"]) == 1
+        assert len(data["judge_results"]) == 0
+
+    def test_history_nonexistent_db_exits_2(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", "/nonexistent.db"])
+        assert result.exit_code == 2
