@@ -154,7 +154,8 @@ class TestEvalCommand:
             "--threshold", "0.3", "--details",
         ])
         assert result.exit_code == 0
-        assert "total_steps=" in result.output or "total_tool_calls=" in result.output
+        assert "total_steps=" in result.output
+        assert "total_tool_calls=" in result.output
 
     def test_details_flag_with_json_format_ignored(self):
         runner = CliRunner()
@@ -484,7 +485,8 @@ class TestImproveCommand:
             "--format", "json",
         ])
         assert result.exit_code == 0
-        assert "skipping" in result.output.lower() or "Warning" in result.output
+        assert "skipping" in result.output.lower()
+        assert "Warning" in result.output
 
     def test_all_invalid_files_exit_1(self, tmp_path):
         bad = tmp_path / "garbage.json"
@@ -700,7 +702,9 @@ class TestCompareCommand:
             "compare", trace, trace, "--details",
         ])
         assert result.exit_code == 0
-        assert "total_ste" in result.output or "failed=0" in result.output
+        assert "Details" in result.output
+        assert "Details" in result.output
+        assert "failed=0" in result.output
 
     def test_details_flag_with_json_format_ignored(self):
         trace = str(FIXTURES_DIR / "simple_trace.json")
