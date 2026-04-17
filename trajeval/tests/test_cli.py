@@ -1027,6 +1027,8 @@ class TestInputFormat:
         assert json_result.exit_code == 0
         clawdbot_data = json.loads(clawdbot_result.output)
         json_data = json.loads(json_result.output)
+        assert "trace_id" in clawdbot_data
+        assert "trace_id" in json_data
         assert clawdbot_data["trace_id"] != json_data["trace_id"]
 
     def test_compare_mixed_formats(self):
