@@ -7,14 +7,14 @@ Accumulated wisdom from optimization iterations.
 ## Recent (last 2 weeks)
 
 ### Theme: 新模块必须对齐已有模式——机械式全扫描，不靠人工判断
-**Sessions:** 20260417-041815, 044129, 061130, 071417, 072246 | **Date:** 2026-04-17
+**Sessions:** 20260417-041815, 044129, 061130, 071417, 072246, 090222 | **Date:** 2026-04-17
 
-**Context:** 同一类问题跨五个 session、三个抽象层反复出现——配置值（pass_threshold 死代码）、CLI 参数（judge 缺 --threshold + exit code）、指标参数（recovery_window 未接入 MetricConfig）、CLI 默认值（annotate 硬编码旧 2 维度）、输入校验（aggregation 用裸 str，--judges 允许 0 和负数）。根因一致：聚焦新逻辑时忽略已有模式的对齐，且"对照已有命令"时凭判断选择性对照，有盲区。
+**Context:** 同一类问题跨六个 session、多个抽象层反复出现——配置值（pass_threshold 死代码）、CLI 参数（judge 缺 --threshold + exit code）、指标参数（recovery_window 未接入 MetricConfig）、CLI 默认值（annotate 硬编码旧 2 维度）、输入校验（aggregation 用裸 str，--judges 允许 0 和负数）、命名前缀（metric_summary key 加了 judge: 前缀但 Finding.metric 仍用原始名称）。根因一致：聚焦新逻辑时忽略已有模式的对齐，且"对照已有命令"时凭判断选择性对照，有盲区。
 
 **Takeaway:**
 - 实现新指标/命令/配置前，列出已有同类模块的完整暴露清单（MetricConfig 字段、CLI 参数、exit code、输出格式）作为对照 checklist
 - 修改 CLI 参数默认值或新增常量时，用 grep 搜索参数名/旧默认值在整个 cli.py 中的所有出现位置——三次同类错误证明人工判断不可靠，机械式全扫描才能覆盖盲区
-- 添加任何配置项后，写测试用不同值断言行为差异——任意值下都通过说明是死代码
+- 任何涉及命名/前缀/key 格式变更的修改，提交前用 grep 搜索旧名称的所有出现位置，确认定义层和引用层全部同步——引用层的同步遗漏比定义层更隐蔽
 - Pydantic 有限选项 str 字段用 Literal 类型，CLI 数值参数用 click.IntRange/FloatRange，作为 code review checklist 固定项
 
 ---
@@ -35,18 +35,19 @@ Accumulated wisdom from optimization iterations.
 
 ---
 
-### Theme: 经验闭环——记录 ≠ 执行，评审循环需主动切断
-**Sessions:** 20260417-051214, 052244, 060431, 070605, 084030 | **Date:** 2026-04-17
+### Theme: 经验闭环——learning < procedure < automation，目标偏移是路径阻力问题
+**Sessions:** 20260417-051214, 052244, 060431, 070605, 084030, 091142, 092130, 093038, 094420 | **Date:** 2026-04-17
 
-**Context:** CLI 测试缺失跨 4 个 session 未关闭，期间 learnings.jsonl 记录了 3 条相关经验但仍重复遗漏。最终驱动修复的是评审 Priority 1。连续高分后 Agent 选低风险任务，方向分降至 7/10。进一步，连续三个 session 在确定性指标模块上迭代，评审改进项收敛到断言强度层面，形成自我强化循环，预设战略目标完全未执行。但评审改进项性质变化本身是模块完成度的最佳信号。
+**Context:** CLI 测试缺失跨 4 个 session 未关闭，弱断言问题跨 5 个 session 反复出现。期间 learnings.jsonl 记录了多条相关经验但未能阻止复发。升级为 procedure（pre-commit-assertion-check.md）后仍未执行。最终驱动修复的是评审 Priority 1。同时，连续高分后 Agent 选低风险任务，方向分降至 7/10；连续三个 session 在确定性指标模块上迭代，评审改进项收敛到断言强度，形成自我强化循环，预设战略目标完全未执行。Agent 提出"目标已完成"的调整提案，但无交付物证据。
 
 **Takeaway:**
-- 被动经验记录对预防重复错误效果有限——将经验升级为 plan 模板的 checkpoint（如"[ ] 测试骨架已创建"），让检查变成流程
+- 三层约束力递增：learning（事后认知）< procedure（执行时文档）< automation（执行时强制）。当问题跨 3+ session 反复出现，直接升级为自动化（git hook 或 CI 步骤），让违规代码无法通过
 - 评审是最有效的外部强制检查点，比"记住并下次注意"可靠
 - 连续高分时警惕"安全选择"陷阱——优先推进核心目标 ACTIVE 项
-- 当评审改进项连续两个 session 收敛到同一类别（断言质量、命名精确度），是模块成熟信号。主动终止迭代，切换到更高价值方向
-- 判断模块是否 feature complete：看改进项性质，从"功能缺失"收敛到"文档/风格/远期考量"时，继续迭代边际收益接近零
-- Session 开始时先检查预设目标，如果当前工作与预设目标不一致，第一个 round 就 flag 并重新对齐
+- 评审改进项连续两个 session 收敛到同一类别时，是模块成熟信号，主动终止迭代
+- 判断模块 feature complete：改进项从"功能缺失"收敛到"文档/风格/远期考量"时，继续迭代边际收益接近零
+- 目标偏移不是认知问题而是路径阻力问题——评审修复项"小而明确"，战略目标"大而模糊"。Session 第一个动作必须直接打开战略目标的交付文件，不允许先处理技术债
+- 当连续多个 session 未执行某目标时，先检查是否有已完成的交付物。有则整理并关闭，无则执行或正式放弃——"提出调整"不能替代显式决策
 
 ---
 
@@ -58,6 +59,15 @@ Accumulated wisdom from optimization iterations.
 **Takeaway:**
 - 同一 session 既做新功能又修旧问题时，用新实现的测试作为旧问题修复的对照基准——断言深度必须对等
 - 当同一测试质量问题跨多个 session 反复出现时，停止在测试层面修补，检查被测数据模型是否携带验证所需的全部信息
+
+---
+
+### 复用显示逻辑时必须验证刻度假设
+**Date:** 2026-04-17 | **Session:** 20260417-085051
+
+**Context:** _print_improvement_report 的颜色阈值 0.7/0.5 是为 0-1 刻度设计的，集成 0-5 刻度的 judge 分数后，2.0/5 的差分显示为绿色。测试未捕获因为没有跨刻度场景。
+
+**Takeaway:** 复用格式化/显示/阈值判断逻辑时，grep 查找硬编码数值常量，追问：这些数值对新数据源的值域是否仍然合理？不同刻度要么归一化输入，要么按来源分支处理阈值。
 
 ---
 
