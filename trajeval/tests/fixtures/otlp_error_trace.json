@@ -1,0 +1,44 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "error-agent"}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {"name": "agent.executor"},
+          "spans": [
+            {
+              "traceId": "err-trace-001",
+              "spanId": "span010",
+              "parentSpanId": "",
+              "name": "tool.database_query",
+              "kind": 1,
+              "startTimeUnixNano": "1700000000000000000",
+              "endTimeUnixNano": "1700000001000000000",
+              "attributes": [
+                {"key": "tool.name", "value": {"stringValue": "database_query"}}
+              ],
+              "status": {"code": 2, "message": "connection timeout"}
+            },
+            {
+              "traceId": "err-trace-001",
+              "spanId": "span011",
+              "parentSpanId": "",
+              "name": "tool.database_query",
+              "kind": 1,
+              "startTimeUnixNano": "1700000001000000000",
+              "endTimeUnixNano": "1700000002000000000",
+              "attributes": [
+                {"key": "tool.name", "value": {"stringValue": "database_query"}}
+              ],
+              "status": {"code": 0}
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

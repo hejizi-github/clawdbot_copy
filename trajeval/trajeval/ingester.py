@@ -200,6 +200,182 @@ def _compute_durations_from_timestamps(steps: list[TraceStep]) -> None:
                 steps[i].duration_ms = float(next_ts - ts)
 
 
+def ingest_otlp_json(source: str | Path | dict) -> AgentTrace:
+    """Ingest an OpenTelemetry (OTLP) JSON export into AgentTrace.
+
+    Supports the standard OTLP JSON format with resourceSpans → scopeSpans → spans.
+    """
+    raw = _load_raw(source) if not isinstance(source, dict) else source
+
+    resource_spans = raw.get("resourceSpans", [])
+    if not resource_spans:
+        raise IngestError("No resourceSpans found in OTLP JSON")
+
+    all_spans: list[dict] = []
+    resource_attrs: dict[str, str] = {}
+
+    for rs in resource_spans:
+        resource = rs.get("resource", {})
+        resource_attrs.update(_flatten_otlp_attributes(resource.get("attributes", [])))
+        for ss in rs.get("scopeSpans", []):
+            for span in ss.get("spans", []):
+                all_spans.append(span)
+
+    if not all_spans:
+        raise IngestError("No spans found in OTLP JSON")
+
+    all_spans.sort(key=lambda s: int(s.get("startTimeUnixNano", "0")))
+
+    trace_id = all_spans[0].get("traceId", str(uuid.uuid4()))
+    agent_name = resource_attrs.get("service.name", "unknown")
+
+    steps: list[TraceStep] = []
+    for span in all_spans:
+        step = _otlp_span_to_step(span)
+        steps.append(step)
+
+    total_tokens = _aggregate_tokens(steps, None)
+    total_duration = sum(s.duration_ms for s in steps)
+
+    final_output = ""
+    for step in reversed(steps):
+        text = step.output.get("text", "")
+        if text:
+            final_output = text[:500]
+            break
+
+    task = resource_attrs.get("agent.task", "")
+    if not task:
+        for step in steps:
+            if step.type == "llm_call" and step.input.get("user_message"):
+                task = step.input["user_message"]
+                break
+
+    return AgentTrace(
+        trace_id=trace_id,
+        agent_name=agent_name,
+        task=task,
+        steps=steps,
+        final_output=final_output,
+        total_duration_ms=total_duration,
+        total_tokens=total_tokens,
+        metadata={
+            "source_format": "otlp_json",
+            **resource_attrs,
+        },
+    )
+
+
+def _flatten_otlp_attributes(attrs: list[dict]) -> dict[str, str]:
+    """Convert OTLP attribute array to a flat dict."""
+    result: dict[str, str] = {}
+    for attr in attrs:
+        key = attr.get("key", "")
+        value = attr.get("value", {})
+        if "stringValue" in value:
+            result[key] = value["stringValue"]
+        elif "intValue" in value:
+            result[key] = str(value["intValue"])
+        elif "doubleValue" in value:
+            result[key] = str(value["doubleValue"])
+        elif "boolValue" in value:
+            result[key] = str(value["boolValue"])
+    return result
+
+
+_OTLP_SPAN_KIND_MAP = {
+    0: "unspecified",
+    1: "internal",
+    2: "server",
+    3: "client",
+    4: "producer",
+    5: "consumer",
+}
+
+
+def _classify_otlp_span(span: dict, attrs: dict[str, str]) -> str:
+    """Map OTLP span to a TraceStep type."""
+    name_lower = span.get("name", "").lower()
+    kind = span.get("kind", 0)
+
+    status_code = span.get("status", {}).get("code", 0)
+    if status_code == 2:
+        return "error"
+
+    if "llm" in name_lower or "chat" in name_lower or "completion" in name_lower:
+        return "llm_call"
+    if attrs.get("gen_ai.system") or attrs.get("llm.system"):
+        return "llm_call"
+
+    if "tool" in name_lower or kind == 1:
+        return "tool_call"
+    if attrs.get("tool.name"):
+        return "tool_call"
+
+    if kind == 3:
+        return "llm_call"
+
+    return "tool_call"
+
+
+def _otlp_span_to_step(span: dict) -> TraceStep:
+    """Convert a single OTLP span to a TraceStep."""
+    attrs = _flatten_otlp_attributes(span.get("attributes", []))
+    step_type = _classify_otlp_span(span, attrs)
+    name = span.get("name", "unknown")
+
+    start_ns = int(span.get("startTimeUnixNano", "0"))
+    end_ns = int(span.get("endTimeUnixNano", "0"))
+    duration_ms = (end_ns - start_ns) / 1_000_000 if end_ns > start_ns else 0.0
+
+    input_data: dict = {}
+    output_data: dict = {}
+
+    if attrs.get("gen_ai.prompt") or attrs.get("llm.prompts"):
+        input_data["user_message"] = attrs.get("gen_ai.prompt", attrs.get("llm.prompts", ""))
+    if attrs.get("gen_ai.completion") or attrs.get("llm.completions"):
+        output_data["text"] = attrs.get("gen_ai.completion", attrs.get("llm.completions", ""))
+    if attrs.get("tool.name"):
+        name = attrs["tool.name"]
+    if attrs.get("tool.parameters"):
+        input_data["parameters"] = attrs["tool.parameters"]
+
+    tokens = None
+    prompt_tokens = int(attrs.get("gen_ai.usage.prompt_tokens", "0") or "0")
+    completion_tokens = int(attrs.get("gen_ai.usage.completion_tokens", "0") or "0")
+    if prompt_tokens or completion_tokens:
+        tokens = TokenUsage(
+            prompt=prompt_tokens,
+            completion=completion_tokens,
+            total=prompt_tokens + completion_tokens,
+        )
+
+    status = span.get("status", {})
+    if status.get("code") == 2:
+        output_data["error"] = status.get("message", "error")
+
+    metadata: dict = {
+        "span_id": span.get("spanId", ""),
+        "parent_span_id": span.get("parentSpanId", ""),
+        "span_kind": _OTLP_SPAN_KIND_MAP.get(span.get("kind", 0), "unknown"),
+    }
+    for k, v in attrs.items():
+        if k not in ("gen_ai.prompt", "gen_ai.completion", "llm.prompts",
+                      "llm.completions", "tool.name", "tool.parameters",
+                      "gen_ai.usage.prompt_tokens", "gen_ai.usage.completion_tokens"):
+            metadata[k] = v
+
+    return TraceStep(
+        type=step_type,
+        name=name,
+        input=input_data,
+        output=output_data,
+        duration_ms=round(duration_ms, 2),
+        tokens=tokens,
+        metadata=metadata,
+    )
+
+
 def ingest_json(source: str | Path | dict) -> AgentTrace:
     """Ingest a trace from a JSON file path, JSON string, or dict."""
     raw = _load_raw(source)

@@ -1,0 +1,67 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "my-agent"}},
+          {"key": "agent.task", "value": {"stringValue": "Summarize the quarterly report"}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {"name": "agent.executor"},
+          "spans": [
+            {
+              "traceId": "abc123def456",
+              "spanId": "span001",
+              "parentSpanId": "",
+              "name": "ChatCompletion",
+              "kind": 3,
+              "startTimeUnixNano": "1700000000000000000",
+              "endTimeUnixNano": "1700000002000000000",
+              "attributes": [
+                {"key": "gen_ai.system", "value": {"stringValue": "openai"}},
+                {"key": "gen_ai.prompt", "value": {"stringValue": "Summarize Q3 results"}},
+                {"key": "gen_ai.completion", "value": {"stringValue": "Q3 revenue grew 15% YoY..."}},
+                {"key": "gen_ai.usage.prompt_tokens", "value": {"intValue": "150"}},
+                {"key": "gen_ai.usage.completion_tokens", "value": {"intValue": "200"}}
+              ],
+              "status": {"code": 0}
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span002",
+              "parentSpanId": "span001",
+              "name": "tool.read_file",
+              "kind": 1,
+              "startTimeUnixNano": "1700000002000000000",
+              "endTimeUnixNano": "1700000002500000000",
+              "attributes": [
+                {"key": "tool.name", "value": {"stringValue": "read_file"}},
+                {"key": "tool.parameters", "value": {"stringValue": "{\"path\": \"report.pdf\"}"}}
+              ],
+              "status": {"code": 0}
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span003",
+              "parentSpanId": "span001",
+              "name": "ChatCompletion",
+              "kind": 3,
+              "startTimeUnixNano": "1700000002500000000",
+              "endTimeUnixNano": "1700000005000000000",
+              "attributes": [
+                {"key": "gen_ai.system", "value": {"stringValue": "openai"}},
+                {"key": "gen_ai.prompt", "value": {"stringValue": "Now summarize the full report"}},
+                {"key": "gen_ai.completion", "value": {"stringValue": "The quarterly report shows strong performance..."}},
+                {"key": "gen_ai.usage.prompt_tokens", "value": {"intValue": "500"}},
+                {"key": "gen_ai.usage.completion_tokens", "value": {"intValue": "300"}}
+              ],
+              "status": {"code": 0}
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
