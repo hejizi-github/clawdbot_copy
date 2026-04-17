@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-085051 — LLM judge 结果集成到改进分析流水线（Phase 3 Session 30）
+
+终于跳出了确定性指标模块的 polish 循环，执行了真正的功能扩展：将 LLM judge 评估结果集成到 improvement 分析流水线中。新增 `analyze_judge_results()` 函数，为 5 个 judge 维度提供 dimension-specific 的改进建议（低分和下降趋势两种模式），CLI `improve` 命令新增 `--judge-files` 选项支持确定性指标与 judge 结果的混合分析。+22 测试（367→389），全部通过，零 ruff 违规。评审 8/10 PASS，发现一个真实 bug：`_print_improvement_report` 的颜色阈值（0.7/0.5）是 0-1 刻度设计的，但 judge 分数是 0-5 刻度，导致 2.0/5 的差分也显示绿色。另有 CLI 无法做 judge-only 分析（`eval_files` 仍为 required）和 metric_summary 键冲突风险两个次要问题。这是连续第 30 个 session，也是第一次成功从确定性指标 polish 转向新功能方向——上一个 session 的「下次不同做」起了作用。
+
+<!-- meta: verdict:PASS score:8.0 test_delta:+22 -->
+
+### 失败/回退分析
+
+无测试失败或回滚。但评审揭示了跨刻度显示的系统性问题：
+
+1. **显示层刻度不匹配** — `_print_improvement_report` 的 `score_color` 用 `>= 0.7` 和 `>= 0.5` 做颜色分界，这是为 0-1 确定性指标设计的。judge 维度分数 0-5 刻度通过同一逻辑时，mean 2.0/5（40%，属于差）也会显示为绿色（>= 0.7）。根因：复用了已有显示逻辑但没考虑新数据源的刻度差异。这与 Session 071417 的「修改一个命令遗漏姊妹命令」是同一类问题的不同表现——**复用代码时未验证隐含假设在新上下文中是否仍然成立**。
+
+2. **CLI 参数设计前后不一致** — `eval_files` 设为 `required=True` 是在只有确定性分析时的合理设计，但新增 `--judge-files` 后语义变了：用户可能只想分析 judge 结果。测试 `test_judge_files_only` 名称也具有误导性——它仍然传了 eval 文件。这是增量开发时未回顾已有约束是否需要放松的典型问题。
+
+### 下次不同做
+
+1. 复用已有显示/格式化逻辑时，检查其隐含的数值范围假设（刻度、单位、边界值），如果新数据源的刻度不同则必须归一化或分支处理
+2. 新增 CLI 选项改变了命令的使用模式时，回顾已有参数的 required/default 设置是否需要调整——用 `--help` 输出做 end-user 视角审查
+3. 测试名必须准确反映测试行为——特别是从已有测试复制修改时，优先重命名以匹配新场景
+
 ## Session 20260417-084030 — 修复 5 项评审反馈 + unused symbol 清理 + trend 排序保证（Phase 3 Session 29）
 
 精准修复了 Session 28 评审的全部 5 个问题：重写了两个测试（`test_medium_fail_rate_generates_medium_priority` 和 `test_exact_medium_threshold`）使其名称、fixture、断言三者语义一致，移除了 `_SCORE_MEDIUM` 未使用常量和 `MetricResult` 未使用导入，给 `analyze_results()` 添加了 timestamp-based 排序保证。额外通过 `ruff check --select F401` 扫描清理了 3 个测试文件的未使用导入。367 tests 全部通过（+2），零回归，零 ruff 违规。评审 9/10 PASS，唯一建议是 `test_partial_timestamps_preserves_input_order` 的断言可以更强（验证 trend 值而非仅 `is not None`）——连续第三个 session 评审改进项收敛到断言强度层面，信号明确：确定性指标模块已彻底成熟，继续 polish 的边际价值极低。
