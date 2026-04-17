@@ -1,0 +1,5 @@
+**Verdict: PASS — 9/10**
+
+Session 29 精准修复了上轮评审的全部 5 个问题：修正了两个测试的命名/断言矛盾、移除了两个未使用符号、添加了 timestamp 排序保证。额外清理了 3 个 F401 违规。367 tests 全部通过，无副作用。
+
+唯一小建议：`test_partial_timestamps_preserves_input_order` 的断言可以更强（验证 trend 值而非仅 `is not None`）。
