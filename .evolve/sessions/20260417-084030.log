@@ -1,0 +1,15 @@
+## Session 29 Summary
+
+**What changed:** Fixed all 5 issues from the Session 28 review:
+
+1. **`test_medium_fail_rate_generates_medium_priority`** — rewrote with correct data (40% fail rate) and assertions that verify MEDIUM priority recommendation is actually generated
+2. **`test_exact_medium_threshold`** — added business logic assertions for `frequently_failing` finding and MEDIUM recommendation
+3. **Removed `_SCORE_MEDIUM`** unused constant from improvement.py
+4. **Removed `MetricResult`** unused import from improvement.py
+5. **Added timestamp-based sorting** — EvalReport gets optional `timestamp` field; `analyze_results()` auto-sorts when all reports have timestamps
+
+Bonus: cleaned 3 unused imports across test files found via `ruff F401` scan.
+
+**Result:** 367 tests pass (+2), zero regressions, zero ruff F401/F841 violations.
+
+**Next:** Integrate LLM judge results into improvement analysis, or implement compare mode timeline tracking.
