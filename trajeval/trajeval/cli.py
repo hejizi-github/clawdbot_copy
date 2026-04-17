@@ -85,6 +85,14 @@ def _load_trace(trace_file: Path, input_format: str):
     help="Persist evaluation result to local SQLite history",
 )
 @click.option(
+    "--compare-baseline", is_flag=True, default=False,
+    help="After evaluation, compare against the last stored result for the same agent. Implies --save.",
+)
+@click.option(
+    "--tolerance", type=float, default=0.05,
+    help="Regression tolerance for --compare-baseline (0.0-1.0, default 0.05)",
+)
+@click.option(
     "--db", type=click.Path(path_type=Path), default=None,
     help=f"SQLite database path (default: {DEFAULT_DB_PATH})",
 )
@@ -100,6 +108,8 @@ def eval(
     similarity_threshold: float,
     details: bool,
     save: bool,
+    compare_baseline: bool,
+    tolerance: float,
     db: Path | None,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
@@ -120,8 +130,15 @@ def eval(
     )
     report = evaluate(trace, config)
 
-    if save:
+    baseline_comparison = None
+    if compare_baseline:
+        save = True
+    if save or compare_baseline:
         with TrajevalDB(db) as store:
+            if compare_baseline:
+                prev = store.get_latest_baseline(trace.agent_name)
+                if prev:
+                    baseline_comparison = compare_reports(prev, report, tolerance=tolerance)
             store.save_eval(report, agent_name=trace.agent_name)
             click.echo(f"Saved to {store.path}", err=True)
 
@@ -132,13 +149,28 @@ def eval(
             "passed": report.passed,
             "metrics": [m.model_dump() for m in report.metrics],
         }
+        if baseline_comparison:
+            result["baseline_comparison"] = {
+                "baseline_trace_id": baseline_comparison.baseline_trace_id,
+                "overall_delta": baseline_comparison.overall_delta,
+                "has_regression": baseline_comparison.has_regression,
+                "tolerance": baseline_comparison.tolerance,
+                "metric_deltas": [d.model_dump() for d in baseline_comparison.metric_deltas],
+            }
         click.echo(json.dumps(result, indent=2))
     elif fmt == "ci":
         click.echo(format_eval_ci(report, threshold=threshold))
+        if baseline_comparison:
+            click.echo("")
+            click.echo(format_compare_ci(baseline_comparison))
     else:
         _print_report(trace, report, show_details=details)
+        if baseline_comparison:
+            console.print()
+            _print_comparison(baseline_comparison, show_details=details)
 
-    sys.exit(0 if report.passed else 1)
+    has_regression = baseline_comparison.has_regression if baseline_comparison else False
+    sys.exit(1 if not report.passed or has_regression else 0)
 
 
 @main.command()

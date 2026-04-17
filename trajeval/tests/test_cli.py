@@ -199,6 +199,129 @@ class TestEvalCommand:
         assert fuzzy_loop["score"] < exact_loop["score"]
 
 
+class TestCompareBaseline:
+    """Tests for --compare-baseline flag on eval command."""
+
+    def _extract_json(self, output: str) -> dict:
+        """Extract JSON from output that may have 'Saved to...' on stderr mixed in."""
+        for line in output.split("\n"):
+            line = line.strip()
+            if line.startswith("{"):
+                return json.loads(output[output.index("{"):])
+        raise ValueError(f"No JSON found in output: {output[:200]}")
+
+    def test_compare_baseline_no_previous_result(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "baseline_comparison" not in data
+
+    def test_compare_baseline_detects_no_regression(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "baseline_comparison" in data
+        assert data["baseline_comparison"]["has_regression"] is False
+        assert data["baseline_comparison"]["overall_delta"] == 0.0
+
+    def test_compare_baseline_detects_regression(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", trace,
+            "--save", "--threshold", "0.3",
+            "--latency-budget", "99999",
+            "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", trace,
+            "--format", "json", "--threshold", "0.3",
+            "--latency-budget", "1",
+            "--compare-baseline", "--tolerance", "0.01",
+            "--db", str(db_path),
+        ])
+        data = json.loads(result.output)
+        assert "baseline_comparison" in data
+        assert data["baseline_comparison"]["has_regression"] is True
+        assert result.exit_code == 1
+
+    def test_compare_baseline_implies_save(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        stderr = result.stderr_bytes.decode() if result.stderr_bytes else ""
+        assert "Saved to" in stderr
+
+    def test_compare_baseline_table_output(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        assert "Compare" in result.output or "unchanged" in result.output.lower()
+
+    def test_compare_baseline_ci_output(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "ci", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        assert "Comparison" in result.output
+
+    def test_compare_baseline_includes_metric_deltas(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        data = json.loads(result.output)
+        assert len(data["baseline_comparison"]["metric_deltas"]) > 0
+        delta_names = [d["name"] for d in data["baseline_comparison"]["metric_deltas"]]
+        assert "step_efficiency" in delta_names
+
+
 class TestFormatDetailsCompact:
     def test_empty_dict(self):
         assert _format_details_compact({}) == ""
