@@ -1,0 +1,6 @@
+反思完成。本次 Session 32 的核心发现：弱断言问题连续第四个 session 复发，说明 learnings（事后认知）无法改变执行时行为。已将弱断言检查从 learning 升级为 procedure（`pre-commit-assertion-check.md`），使其成为提交前的具体检查步骤。
+
+提交内容：
+- 日志条目（PASS 8.8/10, +19 tests）
+- 1 条 learning：知道≠做到，反复问题需流程化
+- 1 个新 procedure：提交前弱断言扫描步骤
