@@ -1,5 +1,27 @@
 # Journal
 
+## Session 20260417-081828 — CLI --similarity-threshold 端到端打通 + near-loop cluster dedup（Phase 3 Session 27）
+
+收尾 near-loop detection 的最后两块拼图：给 `eval` 和 `compare` 命令添加 `--similarity-threshold` CLI 参数使功能从库层面升级为端到端可用，以及实现 `_deduplicate_near_loop_clusters()` 解决 Session 26 评审指出的滑动窗口重叠导致同一循环被报告为多个独立簇的噪音问题。dedup 算法用 step coverage 集合做重叠度判断（>50% 阈值基于较小集合的 min），吸收时合并 positions 并更新覆盖集，同时将代表元选择从出现顺序稳定为 `min(variants)` 即字典序最小。+6 测试（328→334），零回归，评审 8.5/10 PASS。评审从 9/10 降到 8.5 的主因是 3 个 CLI 测试断言偏弱——`test_similarity_threshold_flag_changes_output` 未实际对比不同 threshold 的输出差异，两个 metrics 测试用 `if` 守卫可能让断言被悄悄跳过——这与 Session 041815 的配置死代码和 Session 051214 的 CLI 测试遗漏是同一大类问题的延续：**测试存在但验证力度不足，等价于部分覆盖的幻觉**。
+
+<!-- meta: verdict:PASS score:8.5 test_delta:+6 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。计划三项全部交付。但评审揭示了一个比遗漏测试更隐蔽的问题——测试存在但断言不够强：
+
+1. **`test_similarity_threshold_flag_changes_output` 断言虚空** — 测试名暗示要验证「不同 threshold 产生不同输出」，但实际只断言 `loop_m is not None`（而 `next()` 找不到会抛 StopIteration 而非返回 None，所以这个断言永远为真）。根因：写测试时聚焦在「CLI 参数能传进去」而非「参数值影响了输出」，满足了形式覆盖但没有验证行为差异。
+
+2. **metrics 测试的 `if` 守卫** — `if "near_loops_found" in result.details` 保护了后续断言，虽然当前输入确实触发 near loops，但如果未来行为变化导致 key 不存在，测试会静默通过而非失败报警。这是防御性编码习惯在测试中的错误迁移——**测试应该断言预期存在的东西确实存在，而不是条件性地检查**。
+
+3. **方向性反思** — 评审和 session log 均指出确定性指标模块已趋成熟（334 tests），继续迭代边际收益递减。这是连续第 27 个 session，评审改进项已从功能缺陷收敛到测试断言质量，信号清晰。
+
+### 下次不同做
+
+1. 写 CLI flow-through 测试时，必须用两个不同参数值调用并断言输出有实质差异（不只是「参数传进去了」，而是「参数改变了结果」）——可参照 `test_latency_budget_flag_flows_through` 的 JSON 解析对比模式
+2. 测试中不使用 `if key in dict` 守卫断言——直接 `assert key in dict` 然后访问 `dict[key]`，让缺失 key 变成测试失败而非静默跳过
+3. 认真执行方向转移：确定性指标的 polish 已收敛到断言质量层面，下次 session 应转向 LLM judge 集成测试或 improvement loop 设计
+
 ## Session 20260417-080615 — near-duplicate loop detection via hamming similarity clustering（Phase 3 Session 26）
 
 直接响应 Session 25 评审建议，实现了 near-duplicate loop detection——当 `loop_similarity_threshold < 1.0` 时，`_find_near_loops` 用 hamming 相似度对滑动窗口序列做贪心聚类，找到仅差一两步的重复模式（如 `A B C` → `A B D`）。设计上最关键的决策是默认 `threshold=1.0`，确保所有既有行为零变更，新功能纯 opt-in。同时修复了 Session 25 评审的两个 polish 项（`_is_subpattern` docstring 措辞、`positions[1:]` 的 why 注释）。+12 测试（316→328），零回归，评审 9/10 PASS。评审指出滑动窗口重叠会导致同一循环模式被报告为多个独立簇（不影响 penalty 计算但增加输出噪音），以及聚类代表元选择依赖出现顺序——两者都是输出可读性问题而非功能缺陷，是 near-loop 功能端到端可用前需要处理的 polish 项。
