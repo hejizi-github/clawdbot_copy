@@ -1019,10 +1019,13 @@ class TestInputFormat:
             "eval", str(FIXTURES_DIR / "simple_trace.json"),
             "--format", "json", "--threshold", "0.1",
         ])
+        assert clawdbot_result.exit_code == 0, clawdbot_result.output
+        assert json_result.exit_code == 0, json_result.output
         clawdbot_data = json.loads(clawdbot_result.output)
         json_data = json.loads(json_result.output)
-        assert clawdbot_data["overall_score"] != json_data["overall_score"] or \
-            len(clawdbot_data["metrics"]) == len(json_data["metrics"])
+        assert clawdbot_data["trace_id"] != json_data["trace_id"]
+        assert len(clawdbot_data["metrics"]) > 0
+        assert len(json_data["metrics"]) > 0
 
     def test_compare_mixed_formats(self):
         runner = CliRunner()
