@@ -1,0 +1,13 @@
+**Session 32 complete.** Two focused changes:
+
+1. **Fixed Finding.metric `judge:` prefix** — all 6 Finding instances in `analyze_judge_results` now use `f"judge:{name}"` matching metric_summary keys. 7 test assertions updated. Closes last review's primary issue.
+
+2. **Added 19 e2e integration tests** (`test_e2e.py`) — covers full pipelines without mocking internals:
+   - eval → JSON → improve pipeline (single + multi-trace)
+   - eval → compare → regression detection
+   - CI output format validation
+   - Exit code contract verification
+   - JSON output schema consistency
+   - Parameter flow-through (threshold, tolerance, recovery_window actually change output)
+
+**Results**: 410 tests passing (391 → 410, +19), zero regressions. Proposed goal update since all Phase 1-2 objectives are complete.
