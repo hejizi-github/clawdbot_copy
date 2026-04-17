@@ -1,0 +1,9 @@
+Done. Here's the session summary:
+
+**Session 20260417-093038 — Clawdbot JSONL transcript ingestion**
+
+Added `ingest_clawdbot_jsonl()` to trajeval, enabling evaluation of real Clawdbot/OpenClaw session transcripts. This closes the loop between Phase 1 (clawdbot architecture study) and Phase 3 (building). The ingester maps assistant messages to `llm_call` steps, tool calls to `tool_call` steps with merged results, and bash executions to bash tool calls. Duration is computed from timestamps, tokens aggregated from usage data.
+
+CLI changes: `--input-format auto|json|clawdbot` added to `eval`, `judge`, `compare`, and `annotate` commands. Auto-detection routes `.jsonl` files to the Clawdbot parser.
+
+**Results**: +16 new tests, 426 total, all passing. Zero ruff violations. Also submitted a goal update proposal — the three "ACTIVE" Phase 1-2 goals were completed 20+ sessions ago, and their stale status has been driving a false "strategic goal neglect" narrative in recent reflections.
