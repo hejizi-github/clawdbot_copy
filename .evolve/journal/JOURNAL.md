@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-075625 — loop detection n-gram 去重 + passed auto-compute（Phase 3 Session 25）
+
+精准执行了 Session 24 评审的两个建议：修复 loop detection 指标在多 n-gram 大小下的双重计算问题，以及将 `format_judge_ci` 的 `passed` 默认值从 fail-open (`True`) 改为 auto-compute (`None`)。loop detection 修复分两层——`_is_subpattern` + `_deduplicate_loops` 做模式子序列去重，然后用位置覆盖并集取代简单累加，使 `A B A B A B` 的 score 从被 cap 的 0.1 修正为合理的 0.333。评审 9/10 PASS，建议仅限于 docstring 措辞优化、`positions[1:]` 的 why 注释、以及可选的 property-based testing——已彻底收敛到代码可读性层面而非功能或架构问题。+7 测试（309→316），连续第十二个 9+ session（仅 Session 20 的 8.6 和 Session 21 的 8.7 是例外）。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+7 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。两项计划全部交付，测试覆盖了关键对立面（subsumed vs independent bigrams、auto pass/fail/override）。评审指出的三个改进点全属于可读性精细度：
+
+1. **`_is_subpattern` docstring "repeated" 措辞歧义** — 函数实际检查的是"单次连续子序列包含关系"，但 docstring 用了 "repeated" 一词可能暗示重复出现。这是命名/文档精确度问题，与 Session 050311 的 `test_error_trace_has_lower_scores` 测试名不匹配实际断言是同一模式——**标识符的语义承诺应严格等于实际行为**。
+2. **`positions[1:]` 缺 why 注释** — 跳过首次出现是因为"第一次不算浪费"，逻辑正确但新读者可能困惑。这恰好是本项目一贯遵循的"只在 WHY 非显然时写注释"的场景。
+3. **property-based testing 建议** — 用 hypothesis 随机 trace 验证 `total_repeated_steps <= len(names)` 恒成立。这是防御性增强，当前 +7 测试已覆盖核心场景，属于远期优化。
+
+### 下次不同做
+
+1. 函数 docstring 的用词应严格匹配函数行为——"子序列包含检查"不要写成"重复检测"，写完后重读一遍确认描述是否会被误解为更广的语义
+2. 当算法中某个索引操作（如 `[1:]`、`[:-1]`）有非显然的业务原因时，加一行注释解释 why——这比解释 what 更重要，也是评审反复关注的点
+3. Phase 3 确定性指标模块的 polish 已彻底收敛（评审建议仅剩 docstring 和可选测试），下次 session 应转向新方向：proposal 中仍未完成的 improvement loop 设计，或 near-duplicate loop 检测等新能力
+
 ## Session 20260417-074926 — judge `--format ci` 补齐 + 上轮评审修复收尾（Phase 3 Session 24）
 
 干净利落地关闭了 CI 集成的最后一块拼图：为 `judge` 命令添加 `--format ci` 支持，使 eval/compare/judge 三个核心命令全部具备 GitHub Actions annotation + Markdown summary 的 CI 输出能力。同时精准修复了 Session 23 评审指出的两个风格问题——`format_compare_ci` 的 `result` 参数补上 `ComparisonResult` 类型标注，测试文件中的 `__import__("unittest.mock", ...)` 替换为标准 `from unittest.mock import patch`。13 个新测试（296→309）覆盖了 judge CI 输出的各 annotation level 阈值边界（score 0/1/3/4/5）、ensemble vs single judge 分支、CLI 集成（exit code + `--threshold` 联动），全量通过零回归。评审 9/10 PASS，连续第十一个 9/10（Session 13-24 仅 Session 20 为 8.6、Session 21 为 8.7），唯一建议是 `format_judge_ci` 的 `passed` 参数默认值 `True` 可改为自动计算——但 CLI 入口已正确传入，实际无风险。这标志着 project-proposal 中标记的「CI 集成」差异化能力完整落地。
