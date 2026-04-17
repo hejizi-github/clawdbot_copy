@@ -1381,3 +1381,110 @@ class TestOtlpInputFormat:
         otlp_data = json.loads(otlp_result.output)
         json_data = json.loads(json_result.output)
         assert otlp_data["trace_id"] != json_data["trace_id"]
+
+
+class TestBatchCommand:
+    def test_batch_on_fixtures_dir(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(FIXTURES_DIR), "--input-format", "json",
+        ])
+        assert result.exit_code in (0, 1)
+        assert "Batch Evaluation" in result.output
+
+    def test_batch_json_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(FIXTURES_DIR), "--input-format", "json",
+            "--format", "json",
+        ])
+        assert result.exit_code in (0, 1)
+        data = json.loads(result.output)
+        assert "total_traces" in data
+        assert "metric_aggregates" in data
+        assert "traces" in data
+        assert data["total_traces"] > 0
+
+    def test_batch_ci_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(FIXTURES_DIR), "--input-format", "json",
+            "--format", "ci",
+        ])
+        assert result.exit_code in (0, 1)
+        assert "BATCH_TOTAL=" in result.output
+        assert "BATCH_PASS_RATE=" in result.output
+
+    def test_batch_empty_dir_exit_1(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, ["batch", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "No trace files" in result.output
+
+    def test_batch_all_pass_exit_0(self, tmp_path):
+        trace = {
+            "trace_id": "good",
+            "steps": [
+                {"type": "llm_call", "name": "m", "input": {}, "output": {},
+                 "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+            ],
+        }
+        (tmp_path / "good.json").write_text(json.dumps(trace))
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(tmp_path), "--threshold", "0.5",
+        ])
+        assert result.exit_code == 0
+
+    def test_batch_with_failures_exit_1(self, tmp_path):
+        bad_trace = {
+            "trace_id": "bad",
+            "steps": [
+                {"type": "error", "name": "e1", "input": {}, "output": {}},
+                {"type": "error", "name": "e2", "input": {}, "output": {}},
+                {"type": "error", "name": "e3", "input": {}, "output": {}},
+                {"type": "error", "name": "e4", "input": {}, "output": {}},
+            ],
+        }
+        (tmp_path / "bad.json").write_text(json.dumps(bad_trace))
+        runner = CliRunner()
+        result = runner.invoke(main, ["batch", str(tmp_path)])
+        assert result.exit_code == 1
+
+    def test_batch_json_shows_per_trace_results(self, tmp_path):
+        for i in range(3):
+            trace = {"trace_id": f"t{i}", "steps": [
+                {"type": "llm_call", "name": "m", "input": {}, "output": {},
+                 "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+            ]}
+            (tmp_path / f"trace_{i}.json").write_text(json.dumps(trace))
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(tmp_path), "--format", "json", "--threshold", "0.3",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["traces"]) == 3
+        assert all("trace_id" in t for t in data["traces"])
+        assert all("passed" in t for t in data["traces"])
+
+    def test_batch_threshold_affects_results(self, tmp_path):
+        trace = {
+            "trace_id": "t",
+            "steps": [
+                {"type": "llm_call", "name": "m1", "input": {}, "output": {}, "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+                {"type": "error", "name": "e", "input": {}, "output": {}},
+                {"type": "llm_call", "name": "m2", "input": {}, "output": {}, "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+            ],
+        }
+        (tmp_path / "t.json").write_text(json.dumps(trace))
+        runner = CliRunner()
+        lenient = runner.invoke(main, [
+            "batch", str(tmp_path), "--format", "json", "--threshold", "0.3",
+        ])
+        strict = runner.invoke(main, [
+            "batch", str(tmp_path), "--format", "json", "--threshold", "0.99",
+        ])
+        lenient_data = json.loads(lenient.output)
+        strict_data = json.loads(strict.output)
+        assert lenient_data["passed_traces"] >= strict_data["passed_traces"]
