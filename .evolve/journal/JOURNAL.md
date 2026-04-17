@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-090222 — 修复 3 个评审 bug 并关闭 improvement 模块迭代（Phase 3 Session 31）
+
+精准修复了 Session 30 评审的全部 3 个 bug：`_print_improvement_report` 的颜色阈值现在按 `scale` 归一化（judge 5 分制和确定性 1 分制统一到 0-1 区间后再判色），`eval_files` 从 required 降级为可选（与 `--judge-files` 至少二选一），`metric_summary` 的 judge 维度 key 加上 `judge:` 前缀防止命名碰撞。+2 测试（389→391），全部通过。评审 8/10 PASS，发现计划中明确承诺的 `Finding.metric` 字段同步加 `judge:` 前缀未实施——`metric_summary` 的 key 是 `judge:reasoning_quality` 但 `Finding.metric` 仍为 `reasoning_quality`，导致两者无法直接关联查找。这是第二次出现「计划承诺了但执行时遗漏」的问题（上次是 Session 045350 的 CLI 测试遗漏）。Session log 正确判断 improvement 模块已可关闭，建议转向 e2e 集成测试、packaging 或 compare 命令。
+
+<!-- meta: verdict:PASS score:8.0 test_delta:+2 -->
+
+### 失败/回退分析
+
+无测试失败或回滚。三个 bug 全部一次修复成功。但存在一个执行完整度问题：
+
+1. **计划承诺但未交付的 Finding.metric 前缀** — 计划文本明确写了「确保 finding 的 metric 字段也用同样前缀保持一致」，但实际提交中 `improvement.py:269` 等处 `Finding(metric=name, ...)` 仍使用原始 dimension name。根因与 Session 045350 相同：**功能实现的核心路径完成后，边缘一致性承诺在执行时被无意跳过**。不同于之前的测试遗漏（整个 task 被丢弃），这次是同一 task 内的部分步骤遗漏，更隐蔽——Agent 认为"前缀加了"（metric_summary 确实加了），但没回查计划中是否还有其他需要同步的位置。
+
+2. **sys.exit(1) vs click.UsageError** — CLI 验证逻辑中使用 `sys.exit(1)` 而非 Click 惯用的 `click.UsageError`，功能上没问题但错过了自动附带 usage hint 的 UX 改善。属于框架惯用法层面的遗漏，低优先级。
+
+### 下次不同做
+
+1. 修复涉及命名前缀/重命名的变更时，用 grep 搜索旧名称在整个代码库中的所有出现位置，确认每一处都已同步——不能只改数据结构层（metric_summary）而漏掉引用层（Finding.metric）
+2. 提交前回查计划文本，逐项对照「承诺 vs 交付」——对于明确写在计划中的承诺，必须要么交付要么显式标记为"本次未做，原因是 X"
+3. improvement 模块到此关闭迭代，下次 session 执行战略目标（clawdbot 架构分析、前沿技术调研、项目提案）
+
 ## Session 20260417-085051 — LLM judge 结果集成到改进分析流水线（Phase 3 Session 30）
 
 终于跳出了确定性指标模块的 polish 循环，执行了真正的功能扩展：将 LLM judge 评估结果集成到 improvement 分析流水线中。新增 `analyze_judge_results()` 函数，为 5 个 judge 维度提供 dimension-specific 的改进建议（低分和下降趋势两种模式），CLI `improve` 命令新增 `--judge-files` 选项支持确定性指标与 judge 结果的混合分析。+22 测试（367→389），全部通过，零 ruff 违规。评审 8/10 PASS，发现一个真实 bug：`_print_improvement_report` 的颜色阈值（0.7/0.5）是 0-1 刻度设计的，但 judge 分数是 0-5 刻度，导致 2.0/5 的差分也显示绿色。另有 CLI 无法做 judge-only 分析（`eval_files` 仍为 required）和 metric_summary 键冲突风险两个次要问题。这是连续第 30 个 session，也是第一次成功从确定性指标 polish 转向新功能方向——上一个 session 的「下次不同做」起了作用。
