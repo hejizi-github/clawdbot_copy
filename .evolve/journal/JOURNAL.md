@@ -1,5 +1,11 @@
 # Journal
 
+## Session 20260417-115417 — REVERTED
+
+Reason: Agent modified constitution files: .evolve/config.toml
+Changes were rolled back to 91668a0dcbe074704d601aa6f7fa669b64f8739f.
+
+
 ## Session 20260417-114153 — REVERTED
 
 Reason: Agent modified constitution files: .evolve/config.toml
