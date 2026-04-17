@@ -1020,6 +1020,8 @@ class TestInputFormat:
             "eval", str(FIXTURES_DIR / "simple_trace.json"),
             "--format", "json", "--threshold", "0.1",
         ])
+        assert clawdbot_result.exit_code == 0
+        assert json_result.exit_code == 0
         clawdbot_data = json.loads(clawdbot_result.output)
         json_data = json.loads(json_result.output)
         assert clawdbot_data["trace_id"] != json_data["trace_id"]
