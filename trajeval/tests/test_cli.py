@@ -508,7 +508,7 @@ class TestImproveCommand:
             assert len(rec["suggestion"]) > 20, "Recommendations should be substantive"
             assert rec["title"], "Recommendations must have a title"
 
-    def test_judge_files_only(self, tmp_path):
+    def test_judge_files_with_eval(self, tmp_path):
         jf = tmp_path / "judge1.json"
         jf.write_text(JudgeResult(
             trace_id="t1", overall_score=0.2, model="test",
@@ -522,8 +522,30 @@ class TestImproveCommand:
         ])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert "task_completion" in data["metric_summary"]
+        assert "judge:task_completion" in data["metric_summary"]
         assert "step_efficiency" in data["metric_summary"]
+
+    def test_judge_only_without_eval_files(self, tmp_path):
+        jf = tmp_path / "judge1.json"
+        jf.write_text(JudgeResult(
+            trace_id="t1", overall_score=0.6, model="test",
+            dimensions=[JudgeDimension(name="task_completion", score=3)],
+        ).model_dump_json())
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "improve",
+            "--judge-files", str(jf),
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "judge:task_completion" in data["metric_summary"]
+        assert len(data["metric_summary"]) == 1
+
+    def test_no_files_at_all_exits_1(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["improve"])
+        assert result.exit_code != 0
 
     def test_judge_files_merged_with_eval(self, tmp_path):
         jf1 = tmp_path / "j1.json"
@@ -542,7 +564,7 @@ class TestImproveCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["num_evaluations"] >= 3
-        assert "reasoning_quality" in data["metric_summary"]
+        assert "judge:reasoning_quality" in data["metric_summary"]
         judge_findings = [f for f in data["findings"] if f["metric"] == "reasoning_quality"]
         assert len(judge_findings) > 0
 

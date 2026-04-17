@@ -107,6 +107,7 @@ def analyze_results(reports: list[EvalReport]) -> ImprovementReport:
             "fail_rate": round(fail_rate, 4),
             "std_dev": round(sd, 4),
             "num_evaluations": len(scores),
+            "scale": 1.0,
         }
 
         if len(scores) >= 3:
@@ -250,6 +251,7 @@ def analyze_judge_results(
             "fail_rate": round(fail_rate, 4),
             "std_dev": round(sd, 4),
             "num_evaluations": len(scores),
+            "scale": 5.0,
         }
 
         trend = 0.0
@@ -260,7 +262,7 @@ def analyze_judge_results(
             trend = second_half_avg - first_half_avg
             summary["trend"] = round(trend, 4)
 
-        metric_summary[name] = summary
+        metric_summary[f"judge:{name}"] = summary
 
         if fail_rate >= _JUDGE_FAIL_RATE_HIGH:
             evidence = f"Fails {fail_rate:.0%} of evaluations (mean score: {avg:.1f}/5)"

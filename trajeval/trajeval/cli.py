@@ -368,7 +368,7 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str, threshold:
 
 
 @main.command()
-@click.argument("eval_files", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.argument("eval_files", nargs=-1, required=False, type=click.Path(exists=True, path_type=Path))
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
 @click.option(
     "--judge-files", multiple=True, type=click.Path(exists=True, path_type=Path),
@@ -376,6 +376,10 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str, threshold:
 )
 def improve(eval_files: tuple[Path, ...], fmt: str, judge_files: tuple[Path, ...]):
     """Analyze multiple evaluation results and suggest improvements."""
+    if not eval_files and not judge_files:
+        console.print("[red]Error: provide at least one eval file or --judge-files[/red]")
+        sys.exit(1)
+
     from .metrics import EvalReport
 
     reports = []
@@ -432,11 +436,14 @@ def _print_improvement_report(report):
         summary_table.add_column("Trend", justify="right")
 
         for name, s in sorted(report.metric_summary.items()):
-            score_color = "green" if s["mean_score"] >= 0.7 else "yellow" if s["mean_score"] >= 0.5 else "red"
+            scale = s.get("scale", 1.0)
+            normalized = s["mean_score"] / scale if scale > 0 else s["mean_score"]
+            score_color = "green" if normalized >= 0.7 else "yellow" if normalized >= 0.5 else "red"
             fail_color = "green" if s["fail_rate"] == 0 else "yellow" if s["fail_rate"] < 0.3 else "red"
             trend_val = s.get("trend")
             if trend_val is not None:
-                trend_color = "green" if trend_val > 0.05 else "red" if trend_val < -0.05 else "dim"
+                norm_trend = trend_val / scale if scale > 0 else trend_val
+                trend_color = "green" if norm_trend > 0.05 else "red" if norm_trend < -0.05 else "dim"
                 trend_str = f"[{trend_color}]{trend_val:+.2f}[/{trend_color}]"
             else:
                 trend_str = "[dim]-[/dim]"

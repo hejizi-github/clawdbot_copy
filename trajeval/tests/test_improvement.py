@@ -198,6 +198,7 @@ class TestMetricSummary:
         assert "trend" in summary
         assert summary["num_evaluations"] == 3
         assert summary["fail_rate"] == 0.0
+        assert summary["scale"] == 1.0
 
     def test_single_report_no_trend(self):
         reports = [_report("t1", [("tool_accuracy", 0.8, True)])]
@@ -348,8 +349,8 @@ class TestAnalyzeJudgeResultsEmpty:
         report = analyze_judge_results(results)
         assert report.num_evaluations == 1
         assert len(report.findings) == 0
-        assert "task_completion" in report.metric_summary
-        assert "reasoning_quality" in report.metric_summary
+        assert "judge:task_completion" in report.metric_summary
+        assert "judge:reasoning_quality" in report.metric_summary
 
 
 class TestJudgeConsistentFailure:
@@ -501,13 +502,14 @@ class TestJudgeMetricSummary:
             _judge_result("t3", [("task_completion", 5)]),
         ]
         report = analyze_judge_results(results)
-        summary = report.metric_summary["task_completion"]
+        summary = report.metric_summary["judge:task_completion"]
         assert "mean_score" in summary
         assert "fail_rate" in summary
         assert "std_dev" in summary
         assert "num_evaluations" in summary
         assert "trend" in summary
         assert summary["num_evaluations"] == 3
+        assert summary["scale"] == 5.0
 
     def test_mean_score_correct(self):
         results = [
@@ -515,7 +517,7 @@ class TestJudgeMetricSummary:
             _judge_result("t2", [("task_completion", 4)]),
         ]
         report = analyze_judge_results(results)
-        assert report.metric_summary["task_completion"]["mean_score"] == 3.0
+        assert report.metric_summary["judge:task_completion"]["mean_score"] == 3.0
 
     def test_fail_rate_with_custom_threshold(self):
         results = [
@@ -523,10 +525,10 @@ class TestJudgeMetricSummary:
             _judge_result("t2", [("task_completion", 4)]),
         ]
         report_default = analyze_judge_results(results, pass_threshold=3)
-        assert report_default.metric_summary["task_completion"]["fail_rate"] == 0.0
+        assert report_default.metric_summary["judge:task_completion"]["fail_rate"] == 0.0
 
         report_strict = analyze_judge_results(results, pass_threshold=4)
-        assert report_strict.metric_summary["task_completion"]["fail_rate"] == 0.5
+        assert report_strict.metric_summary["judge:task_completion"]["fail_rate"] == 0.5
 
 
 class TestJudgeMultipleDimensions:
@@ -552,4 +554,4 @@ class TestJudgeErrorFiltering:
         ]
         report = analyze_judge_results(results)
         assert report.num_evaluations == 2
-        assert report.metric_summary["task_completion"]["num_evaluations"] == 2
+        assert report.metric_summary["judge:task_completion"]["num_evaluations"] == 2
