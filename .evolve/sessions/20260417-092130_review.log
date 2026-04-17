@@ -1,0 +1,7 @@
+评审完成。
+
+**Verdict: PASS (8.6/10)**
+
+核心发现：两个弱断言修复质量高——特别是 `recovery_window` 那个没有强行断言不成立的 score 差异，而是正确转为验证参数 flow-through（经验证 metrics.py:372 确实输出该字段）。CI 流水线结构完整。410 tests 全通过，ruff clean。
+
+小改进建议：CI 的 ruff 应 pin 版本，Count tests 步骤可移除。下次建议回到核心功能推进。

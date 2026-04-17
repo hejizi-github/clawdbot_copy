@@ -3,25 +3,22 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 修复上次评审遗留 bug + 补充 e2e 测试，明确推进项目质量和可验证性
-- 完成度 (25%): 8/10 — 19 个 e2e 测试覆盖全面，但有 2 个断言是空检查（见下方）
-- 准确性 (20%): 8/10 — metric 前缀修复正确（metric_summary key 与 Finding.metric 一致），但两个 `or True` 断言逻辑有误
-- 一致性 (15%): 9/10 — 与已有策略文件一致，目标调整提案合理
-- 副作用 (10%): 10/10 — 410 个测试全部通过，无回归，改动干净隔离
+- 方向正确性 (30%): 8/10 — 修复弱断言和添加 CI 都是项目成熟度的正确投资，但属于基础设施工作而非核心功能推进
+- 完成度 (25%): 9/10 — 两个弱断言修复彻底（grep 验证无残留），CI 三阶段流水线完整，ruff 全量清理干净
+- 准确性 (20%): 9/10 — recovery_window 的 flow-through 断言经验证确实对应 metrics.py:372 的实际输出；CI YAML 语法合法；410 tests 全部通过
+- 一致性 (15%): 9/10 — 与 project-proposal.md 中 trajeval 的定位一致，CI 工作流与 pyproject.toml 的 dev 依赖配置协调
+- 副作用 (10%): 8/10 — ruff line-length 从 100→120 且对 tests/ 和 improvement.py 豁免 E501，是合理的务实选择；变量重命名 l→ln/lp 纯机械替换无风险
 
-**加权总分**: 8.8/10
+**加权总分**: 8.6/10
 
 **做得好的地方**:
-- Finding.metric 前缀修复精准，6 处代码 + 7 处测试断言全部同步更新，与 metric_summary 的 `judge:` key 保持一致
-- e2e 测试设计思路好：覆盖 eval→improve pipeline、eval→compare pipeline、CI output、exit code contract、JSON schema consistency、参数 flow-through，7 个测试类 19 个测试方法
-- 使用 CliRunner 做真实 CLI 调用而非 mock 内部模块，是 e2e 测试的正确做法
-- 提出目标调整提案，说明 Agent 有方向意识
+- 弱断言修复策略准确：`test_tolerance_changes_regression_detection` 拆析取式为独立断言是正解；`test_recovery_window_affects_score` 没有强行断言 score 差异（实际相同），而是转为验证参数 flow-through，体现了对被测代码行为的正确理解
+- CI 设计合理：lint→test→build 的依赖链、paths 过滤避免无关触发、矩阵覆盖三个 Python 版本、artifact 上传，都是实用的选择
+- 在修复断言前先补了 `assert short_recovery is not None` 的前置检查，带有清晰的错误信息
 
 **需要改进的地方**:
-- `test_recovery_window_affects_score` (line 332): `assert short_recovery["score"] != long_recovery["score"] or True` — `or True` 使断言永远通过，这是一个 no-op。如果不确定 recovery_window 是否一定影响分数，应该改为只检查两次调用都成功返回了 error_recovery metric，或者干脆移除这个断言换成更有意义的检查
-- `test_tolerance_changes_regression_detection` (line 280): `assert data_tight["has_regression"] is True or data_loose["has_regression"] is False` — 这个断言过于宽松，两个条件只要满足一个就过。期望的语义应该是：tight tolerance 检测到回归 AND loose tolerance 不检测到回归。建议改为两个独立断言
+- CI 的 test job 中 `pytest tests/ --tb=short -q --co -q 2>&1 | tail -1`（Count tests 步骤）在 CI 环境中价值有限——它只是打印测试数量但不影响 pass/fail，考虑移除或改为更有意义的输出
+- `ruff check` 在 lint job 中直接 `pip install ruff` 没有锁定版本，未来 ruff 升级可能导致 CI 意外失败；建议 pin 版本或从 `.[dev]` 安装
 
 **下次 session 的建议**:
-- 修复上述 2 个弱断言，让 e2e 测试真正验证参数 flow-through 的语义
-- 按目标调整提案推进 Phase 3：packaging/PyPI 发布准备或 GitHub Actions CI 是高价值方向
-- 考虑给 trajeval 补充 `--help` 输出的 e2e 测试，验证 CLI 帮助信息的完整性
+- 基础设施已到位，建议回到核心功能推进。可以考虑：(1) 增加 LLM judge 的 mock 测试覆盖 scorer.py 的核心路径，(2) 实现 project-proposal.md 中提到的还未开发的功能模块，(3) 推动 CI 首次在 GitHub 上实际运行并验证
