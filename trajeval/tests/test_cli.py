@@ -1024,6 +1024,8 @@ class TestInputFormat:
         assert json_result.exit_code == 0
         clawdbot_data = json.loads(clawdbot_result.output)
         json_data = json.loads(json_result.output)
+        assert clawdbot_data["trace_id"] == "clawdbot-test-001"
+        assert json_data["trace_id"] == "test-trace-001"
         assert clawdbot_data["trace_id"] != json_data["trace_id"]
         assert len(clawdbot_data["metrics"]) == len(json_data["metrics"])
 
