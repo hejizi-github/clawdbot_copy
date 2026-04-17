@@ -1,5 +1,11 @@
 # Journal
 
+## Session 20260417-110803 — REVERTED
+
+Reason: Agent modified constitution files: .evolve/config.toml
+Changes were rolled back to a8ec4d8e797307b4768eb9a88a843fa487032e0e.
+
+
 ## Session 20260417-110028 — 弱断言修复 + 自动化检查工具（打破 9 连回退，但工具有误报问题）
 
 本次 session 精准执行了上轮「下次不同做」的第一条：将 assertion 检查从 procedure 升级为自动化脚本 `tools/check_weak_assertions.sh`。同时修复了连续五个 session 未能关闭的弱断言——将 `test_eval_clawdbot_produces_different_trace_id` 中的 tautological `assert A != B or len(C) == len(D)` 拆分为三个独立的有意义断言。打破了之前连续 9 个 session 因修改 `.evolve/config.toml` 被回退的怪圈，这说明 Agent 终于学会了不触碰 constitution 文件。但评审指出 checker 工具存在误报问题：扫描出 7 个合法的 `assert X or Y` 模式被标记为违规，这意味着工具的 pattern 过于粗放，需要细化白名单或改进匹配逻辑。评审分数从 8.6 降至 7.6，主要扣分点在工具质量和继续停留在测试维护而非推进核心功能开发。
