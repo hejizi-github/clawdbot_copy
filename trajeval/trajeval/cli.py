@@ -18,6 +18,7 @@ from .improvement import ImprovementReport, Priority, analyze_judge_results, ana
 from .ingester import IngestError, ingest_clawdbot_jsonl, ingest_json
 from .metrics import MetricConfig, evaluate
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
+from .storage import ResultStore
 
 console = Console()
 
@@ -74,6 +75,10 @@ def _load_trace(trace_file: Path, input_format: str):
     "--details", is_flag=True, default=False,
     help="Show metric details in table output",
 )
+@click.option(
+    "--store", "store_path", type=click.Path(path_type=Path), default=None,
+    help="SQLite database path to persist evaluation results",
+)
 def eval(
     trace_file: Path,
     fmt: str,
@@ -85,6 +90,7 @@ def eval(
     latency_budget: float | None,
     similarity_threshold: float,
     details: bool,
+    store_path: Path | None,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
@@ -103,6 +109,18 @@ def eval(
         pass_threshold=threshold,
     )
     report = evaluate(trace, config)
+
+    if store_path is not None:
+        store = ResultStore(store_path)
+        result_id = store.store_eval(
+            report,
+            agent_name=trace.agent_name,
+            config=config.model_dump(),
+            source_file=str(trace_file),
+        )
+        store.close()
+        if fmt == "table":
+            console.print(f"[dim]Stored as result #{result_id} in {store_path}[/dim]")
 
     if fmt == "json":
         result = {
@@ -410,6 +428,71 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str, threshold:
 
     if threshold is not None:
         sys.exit(0 if passed else 1)
+
+
+@main.command()
+@click.argument("db_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--trace-id", default=None, help="Filter by trace ID")
+@click.option("--agent", default=None, help="Filter by agent name")
+@click.option("--limit", type=int, default=20, help="Max results to show (default 20)")
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+def history(db_file: Path, trace_id: str | None, agent: str | None, limit: int, fmt: str):
+    """View stored evaluation results from a SQLite database."""
+    store = ResultStore(db_file)
+    results = store.get_history(trace_id=trace_id, agent_name=agent, limit=limit)
+    store.close()
+
+    if not results:
+        console.print("[yellow]No results found[/yellow]")
+        sys.exit(0)
+
+    if fmt == "json":
+        output = [
+            {
+                "id": r.id,
+                "trace_id": r.trace_id,
+                "agent_name": r.agent_name,
+                "overall_score": r.overall_score,
+                "passed": r.passed,
+                "source_file": r.source_file,
+                "timestamp": r.timestamp,
+                "metrics": [m.model_dump() for m in r.metrics],
+            }
+            for r in results
+        ]
+        click.echo(json.dumps(output, indent=2))
+    else:
+        _print_history(results)
+
+
+def _print_history(results):
+    from datetime import datetime, timezone
+
+    table = Table(title=f"Evaluation History ({len(results)} results)")
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Trace ID", style="cyan")
+    table.add_column("Agent", style="dim")
+    table.add_column("Score", justify="right")
+    table.add_column("Status", justify="center")
+    table.add_column("Source", style="dim")
+    table.add_column("Time", style="dim")
+
+    for r in results:
+        score_color = "green" if r.passed else "red"
+        status = "[green]PASS[/green]" if r.passed else "[red]FAIL[/red]"
+        ts = datetime.fromtimestamp(r.timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        source = Path(r.source_file).name if r.source_file else ""
+        table.add_row(
+            str(r.id),
+            r.trace_id[:20],
+            r.agent_name,
+            f"[{score_color}]{r.overall_score:.2f}[/{score_color}]",
+            status,
+            source,
+            ts,
+        )
+
+    console.print(table)
 
 
 @main.command()
