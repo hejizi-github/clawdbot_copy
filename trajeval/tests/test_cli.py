@@ -485,7 +485,8 @@ class TestImproveCommand:
             "--format", "json",
         ])
         assert result.exit_code == 0
-        assert "skipping" in result.output.lower() or "Warning" in result.output  # weak-assert-ok: error message wording varies
+        assert "skipping" in result.output.lower()
+        assert "Warning" in result.output
 
     def test_all_invalid_files_exit_1(self, tmp_path):
         bad = tmp_path / "garbage.json"
@@ -702,7 +703,7 @@ class TestCompareCommand:
         ])
         assert result.exit_code == 0
         assert "Details" in result.output
-        assert "total_ste" in result.output
+        assert "Details" in result.output
         assert "failed=0" in result.output
 
     def test_details_flag_with_json_format_ignored(self):

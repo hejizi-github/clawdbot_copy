@@ -110,7 +110,8 @@ class TestEvalComparePipeline:
             "--format", "markdown",
             "--threshold", "0.3",
         ])
-        assert "##" in result.output or "Metric" in result.output  # weak-assert-ok: markdown format check
+        assert "##" in result.output
+        assert "Metric" in result.output
 
     def test_compare_ci_output(self):
         runner = CliRunner()
@@ -344,6 +345,7 @@ class TestClawdbotE2EPipeline:
         runner = CliRunner()
         result = runner.invoke(main, [
             "eval", str(self.CLAWDBOT_FIXTURE),
+            "--input-format", "clawdbot",
             "--format", "json", "--threshold", "0.1",
         ])
         assert result.exit_code == 0
@@ -394,6 +396,28 @@ class TestClawdbotE2EPipeline:
         assert improve_data["num_evaluations"] == 1
         assert "findings" in improve_data
         assert "recommendations" in improve_data
+
+    def test_clawdbot_multi_eval_improve(self, tmp_path):
+        runner = CliRunner()
+        eval_files = []
+        for i in range(3):
+            result = runner.invoke(main, [
+                "eval", str(self.CLAWDBOT_FIXTURE),
+                "--input-format", "clawdbot",
+                "--format", "json", "--threshold", "0.1",
+            ])
+            assert result.exit_code == 0
+            f = tmp_path / f"eval_{i}.json"
+            f.write_text(result.output)
+            eval_files.append(str(f))
+
+        args = ["improve"] + eval_files + ["--format", "json"]
+        improve_result = runner.invoke(main, args)
+        assert improve_result.exit_code == 0
+        improve_data = json.loads(improve_result.output)
+        assert improve_data["num_evaluations"] == 3
+        assert isinstance(improve_data["metric_summary"], dict)
+        assert len(improve_data["metric_summary"]) >= 3
 
 
 class TestVersionCommand:
