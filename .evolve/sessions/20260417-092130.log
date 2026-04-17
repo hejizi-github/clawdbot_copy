@@ -1,0 +1,11 @@
+Done. Here's what this session accomplished:
+
+**Fixed 2 weak assertions** (closing the 4-session recurring issue):
+- `test_tolerance_changes_regression_detection`: split disjunctive `A or B` into two independent assertions verifying tight=regression, loose=no-regression
+- `test_recovery_window_affects_score`: replaced `or True` no-op with flow-through verification — asserting recovery_window value appears in details matching the passed parameter
+
+**Added GitHub Actions CI** (`.github/workflows/ci.yml`):
+- 3-job pipeline: lint (ruff) → test (Python 3.11/3.12/3.13 matrix) → build (wheel + sdist)
+- Triggered on push/PR to master for trajeval/ changes
+
+**Cleaned up all ruff violations**: E741 variable renames, E501 line breaks, import sorting. All 410 tests pass, `ruff check` clean.
