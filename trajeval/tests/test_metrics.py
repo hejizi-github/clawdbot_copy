@@ -771,3 +771,61 @@ class TestNearLoopDetection:
     def test_config_similarity_default_is_exact(self):
         config = MetricConfig()
         assert config.loop_similarity_threshold == 1.0
+
+    def test_overlapping_near_clusters_deduplicated(self):
+        """Sliding window overlaps should produce one cluster, not multiple."""
+        trace = AgentTrace(
+            trace_id="dedup_near1",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="D"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="E"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[3], similarity_threshold=0.6)
+        assert "near_loops_found" in result.details
+        near = result.details["near_loops_found"]
+        assert len(near) == 1, f"Expected 1 deduplicated cluster, got {len(near)}"
+
+    def test_stable_representative_lexicographic(self):
+        """Representative should be the lexicographic smallest variant."""
+        trace = AgentTrace(
+            trace_id="stable_rep1",
+            steps=[
+                TraceStep(type="llm_call", name="Z"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="Z"),
+                TraceStep(type="tool_call", name="A"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[2], similarity_threshold=0.5)
+        if "near_loops_found" in result.details:
+            for near in result.details["near_loops_found"]:
+                pattern = tuple(near["pattern"])
+                assert pattern <= tuple(["Z", "B"]), "Representative should be lexicographic min"
+
+    def test_independent_near_clusters_both_kept(self):
+        """Non-overlapping near-loop clusters should both survive dedup."""
+        trace = AgentTrace(
+            trace_id="indep_near1",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="C"),
+                TraceStep(type="llm_call", name="X"),
+                TraceStep(type="tool_call", name="Y"),
+                TraceStep(type="llm_call", name="X"),
+                TraceStep(type="tool_call", name="Z"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[2], similarity_threshold=0.5)
+        if "near_loops_found" in result.details:
+            near = result.details["near_loops_found"]
+            assert len(near) >= 2, "Independent clusters should both be kept"

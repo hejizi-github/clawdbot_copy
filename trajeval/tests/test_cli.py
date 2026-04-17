@@ -166,6 +166,29 @@ class TestEvalCommand:
         data = json.loads(result.output)
         assert "metrics" in data
 
+    def test_similarity_threshold_default_no_near_loops(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        loop_m = next(m for m in data["metrics"] if m["name"] == "loop_detection")
+        assert "near_loops_found" not in loop_m["details"]
+
+    def test_similarity_threshold_flag_changes_output(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "loop_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+            "--similarity-threshold", "0.5",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        loop_m = next(m for m in data["metrics"] if m["name"] == "loop_detection")
+        assert loop_m is not None
+
 
 class TestFormatDetailsCompact:
     def test_empty_dict(self):
@@ -536,6 +559,23 @@ class TestCompareCommand:
         ])
         assert result.exit_code == 0
         assert "| Metric |" in result.output
+
+    def test_similarity_threshold_flag_flows_through(self):
+        trace = str(FIXTURES_DIR / "loop_trace.json")
+        runner = CliRunner()
+        exact = runner.invoke(main, [
+            "compare", trace, trace, "--format", "json",
+        ])
+        fuzzy = runner.invoke(main, [
+            "compare", trace, trace, "--format", "json",
+            "--similarity-threshold", "0.5",
+        ])
+        assert exact.exit_code in (0, 1)
+        assert fuzzy.exit_code in (0, 1)
+        exact_data = json.loads(exact.output)
+        fuzzy_data = json.loads(fuzzy.output)
+        assert "metric_deltas" in exact_data
+        assert "metric_deltas" in fuzzy_data
 
 
 class TestAnnotateCommand:

@@ -154,6 +154,44 @@ def _deduplicate_loops(loops: list[dict]) -> list[dict]:
     return kept
 
 
+def _step_coverage(positions: list[int], length: int) -> set[int]:
+    """Compute the set of step indices covered by n-gram occurrences."""
+    covered: set[int] = set()
+    for p in positions:
+        for offset in range(length):
+            covered.add(p + offset)
+    return covered
+
+
+def _deduplicate_near_loop_clusters(clusters: list[dict]) -> list[dict]:
+    """Merge near-loop clusters whose step coverage overlaps by >50%."""
+    if len(clusters) <= 1:
+        return clusters
+    sorted_clusters = sorted(clusters, key=lambda c: c["occurrences"], reverse=True)
+    kept: list[dict] = []
+    kept_coverage: list[set[int]] = []
+    for cluster in sorted_clusters:
+        coverage = _step_coverage(cluster["_positions"], cluster["length"])
+        absorbed = False
+        for i, existing_cov in enumerate(kept_coverage):
+            overlap = len(coverage & existing_cov)
+            smaller = min(len(coverage), len(existing_cov))
+            if smaller > 0 and overlap / smaller > 0.5:
+                existing_cov.update(coverage)
+                existing = kept[i]
+                existing["_positions"] = sorted(
+                    set(existing["_positions"]) | set(cluster["_positions"])
+                )
+                existing["occurrences"] = len(existing["_positions"])
+                existing["variants"] = max(existing["variants"], cluster["variants"])
+                absorbed = True
+                break
+        if not absorbed:
+            kept.append(cluster)
+            kept_coverage.append(coverage)
+    return kept
+
+
 def _find_near_loops(
     names: list[str],
     ngram_sizes: list[int],
@@ -185,18 +223,24 @@ def _find_near_loops(
                     "variants": {gram},
                 })
 
+        candidates = []
         for cluster in clusters:
             if len(cluster["positions"]) < min_repeats:
                 continue
             if len(cluster["variants"]) == 1 and cluster["representative"] in exact_patterns:
                 continue
-            near_loops.append({
-                "pattern": list(cluster["representative"]),
+            # Stable representative: lexicographic smallest variant
+            rep = min(cluster["variants"])
+            candidates.append({
+                "pattern": list(rep),
                 "length": n,
                 "occurrences": len(cluster["positions"]),
                 "variants": len(cluster["variants"]),
                 "_positions": cluster["positions"],
             })
+
+        candidates = _deduplicate_near_loop_clusters(candidates)
+        near_loops.extend(candidates)
 
     return _deduplicate_loops(near_loops)
 

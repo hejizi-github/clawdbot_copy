@@ -46,6 +46,10 @@ def main():
     help="Latency budget in milliseconds for speed scoring",
 )
 @click.option(
+    "--similarity-threshold", type=float, default=1.0,
+    help="Loop similarity threshold (0.0-1.0, default 1.0). Below 1.0 enables near-duplicate loop detection.",
+)
+@click.option(
     "--details", is_flag=True, default=False,
     help="Show metric details in table output",
 )
@@ -57,6 +61,7 @@ def eval(
     threshold: float,
     recovery_window: int,
     latency_budget: float | None,
+    similarity_threshold: float,
     details: bool,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
@@ -71,6 +76,7 @@ def eval(
         baseline_tokens=baseline_tokens,
         recovery_window=recovery_window,
         latency_budget_ms=latency_budget,
+        loop_similarity_threshold=similarity_threshold,
         pass_threshold=threshold,
     )
     report = evaluate(trace, config)
@@ -199,6 +205,10 @@ def judge_cmd(trace_file: Path, model: str, fmt: str, dimensions: str, threshold
     help="Latency budget in milliseconds for speed scoring",
 )
 @click.option(
+    "--similarity-threshold", type=float, default=1.0,
+    help="Loop similarity threshold (0.0-1.0, default 1.0). Below 1.0 enables near-duplicate loop detection.",
+)
+@click.option(
     "--details", is_flag=True, default=False,
     help="Show metric details in table output",
 )
@@ -212,6 +222,7 @@ def compare(
     threshold: float,
     recovery_window: int,
     latency_budget: float | None,
+    similarity_threshold: float,
     details: bool,
 ):
     """Compare two traces and detect metric regressions."""
@@ -227,6 +238,7 @@ def compare(
         baseline_tokens=baseline_tokens,
         recovery_window=recovery_window,
         latency_budget_ms=latency_budget,
+        loop_similarity_threshold=similarity_threshold,
         pass_threshold=threshold,
     )
     baseline_report = evaluate(baseline_trace, config)
