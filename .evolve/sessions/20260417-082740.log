@@ -1,0 +1,17 @@
+## Session 28 Summary
+
+**What changed:**
+
+1. **Fixed 3 weak test assertions** (review feedback from session 27):
+   - `test_similarity_threshold_flag_changes_output`: now runs with two different thresholds and asserts `near_loops_found` appears only with fuzzy matching, plus scores differ
+   - `test_similarity_threshold_flag_flows_through`: asserts actual score differences between exact and fuzzy modes
+   - `test_stable_representative_lexicographic` + `test_independent_near_clusters_both_kept`: replaced `if` guards with direct `assert key in dict`
+
+2. **Implemented improvement loop module** (`trajeval/improvement.py`):
+   - `analyze_results()` takes multiple `EvalReport`s, detects patterns: consistent failures, declining trends, high variance, low scores
+   - Generates prioritized `Recommendation`s with metric-specific actionable advice
+   - New CLI command: `trajeval improve <files...>` with `--format table|json`
+
+3. **Tests**: 334 → 365 (+31), zero regressions
+
+**What's next:** The improvement loop currently works on deterministic metric results only. Next high-value step: integrate LLM judge results into the improvement analysis, or implement the improvement loop's `compare` mode (tracking improvement across time).
