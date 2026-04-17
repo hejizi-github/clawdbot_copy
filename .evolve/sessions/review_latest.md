@@ -3,25 +3,28 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 直接响应上次 review 的三个建议（CLI 集成测试、packaging 验证、变量遮蔽修复），推进 trajeval 向可发布状态演进
-- 完成度 (25%): 8/10 — 14 个新测试覆盖了 eval/compare/annotate/judge 四个命令的 --input-format 路径，py.typed marker 和 ingester 修复均到位；pyproject.toml entry point 经验证已存在但非本次变更（plan 中列为目标略有误导）
-- 准确性 (20%): 7/10 — `test_eval_clawdbot_produces_different_trace_id` 断言逻辑有缺陷：`assert A != B or len(C) == len(D)` 中 or 右侧几乎恒真，导致测试永远通过，名不副实；其余测试断言准确
-- 一致性 (15%): 9/10 — 与 project-proposal.md 中"支持 Clawdbot JSONL 格式"和"CLI 入口"的目标完全一致
-- 副作用 (10%): 10/10 — 变更干净隔离，ingester.py 的 text→raw 重命名不影响外部接口，新增文件均为测试/类型标记
+- 方向正确性 (30%): 7/10 — 修复弱断言 + 自动化检查工具是有价值的质量改进，但属于维护性工作，对核心功能推进有限
+- 完成度 (25%): 7/10 — 测试修复完整正确；检查工具存在误报问题（将合法的 `assert "a" in x or "b" in x` 也标记为违规）
+- 准确性 (20%): 8/10 — 断言逻辑正确：`trace_id` 字段确认存在于 CLI JSON 输出（cli.py:109），`metrics` 非空检查有意义
+- 一致性 (15%): 9/10 — 与 project-proposal.md 的 MVP 成功标准（"30+ unit tests, all passing"）一致，测试质量是项目目标的一部分
+- 副作用 (10%): 8/10 — 改动干净隔离，无破坏；checker 工具的误报不影响已有功能
 
-**加权总分**: 8.6/10
+**加权总分**: 7.6/10
 
 **做得好的地方**:
-- 响应性强：精确针对上次 review 的三个建议逐一落实
-- 测试覆盖面广：14 个测试覆盖四个 CLI 命令 × 自动检测/显式指定两种模式，加上错误路径（malformed/empty JSONL）
-- Clawdbot fixture 质量高：包含完整的 user→assistant→toolCall→toolResult→assistant 流程，具备 usage/cost 数据，贴近真实场景
-- ingester.py 的 text→raw 重命名干净，消除了与循环内 `text` 变量的潜在混淆
+- 终于打破了连续 9 次因修改 config.toml 被 revert 的循环，这本身就是重要进步
+- 测试修复精准：新断言 `assert clawdbot_data["trace_id"] != json_data["trace_id"]` 完美匹配测试名称的语义（`test_eval_clawdbot_produces_different_trace_id`）
+- 增加了 exit_code 前置检查，使失败信息更清晰
+- "程序 → 自动化"的思路正确——从手动检查升级为工具化检查
 
 **需要改进的地方**:
-- `test_eval_clawdbot_produces_different_trace_id`（test_cli.py ~L1015）：断言 `assert A != B or len(C) == len(D)` 是 tautology —— or 右侧（metrics 数量相等）几乎恒为 True，所以无论 A 和 B 是否相等测试都会通过。建议改为直接断言 trace_id 不同：`assert clawdbot_data["trace_id"] != json_data["trace_id"]`，或分别断言两个有意义的属性
-- Session log 称 "426 → 440" 测试数量增长正确（已验证 440 total），但 plan 中将 pyproject.toml entry point 列为"要做的变更"实际并未修改该文件（entry point 已在之前 session 添加），plan 和实际产出有小出入
+- **checker 工具误报严重**：当前 `assert .* or ` 模式会匹配 7 个合法断言（如 `assert "loop" in text or "repetitive" in text`），这些是检查多个可接受输出的合理模式。工具需要区分：
+  - 危险模式：`assert A != B or len(C) == len(D)`（右侧几乎总为真）
+  - 合法模式：`assert "word1" in text or "word2" in text`（检查替代可接受值）
+  - 建议：排除两侧结构对称的字符串包含检查，或改为仅 warning 不 exit 1
+- **工具未集成到工作流**：计划中提到要加入 `verification.commands`，但实际没有做（可能是为了避免修改 config.toml，这个决定可以理解）
 
 **下次 session 的建议**:
-- 修复 `test_eval_clawdbot_produces_different_trace_id` 的断言逻辑，确保测试真正验证预期行为
-- 考虑添加一个端到端测试：用真实（或更复杂的）Clawdbot JSONL fixture 跑完整 eval pipeline，验证 metrics 数值的合理性
-- 如果准备发布到 PyPI，可以在 help_requests/ 提出 API token 需求；否则优先推进 OTLP 支持或 LLM-as-judge 的集成测试
+- 优先推进 trajeval 核心功能开发，而非继续在测试质量上投入——测试修复已经稳定，应转向 Phase 3 的实质性构建
+- 如果要改进 checker 工具，考虑用 AST 解析替代正则匹配来准确识别弱断言模式
+- 可以开始实现 project-proposal.md 中的下一个 MVP 特性（如 regression detection 或 LLM-as-judge 维度扩展）

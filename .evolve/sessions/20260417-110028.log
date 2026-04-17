@@ -1,0 +1,7 @@
+**Session summary:**
+
+1. **Fixed the weak assertion** in `test_eval_clawdbot_produces_different_trace_id` (line 1024-1025): replaced tautological `assert A != B or len(C) == len(D)` with three meaningful assertions — verifying exit codes, different trace_ids, and non-empty metrics.
+
+2. **Created `tools/check_weak_assertions.sh`** — automated scanner for `assert...or True`, `assert...or False`, and disjunctive `assert X or Y` patterns. This escalates the existing procedure to automation, addressing the learning that procedures alone weren't enforced across 5+ sessions.
+
+3. **All 440 tests pass.** No protected files modified.

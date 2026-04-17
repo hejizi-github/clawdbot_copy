@@ -1,0 +1,6 @@
+Reflection committed. Key takeaways from this session:
+
+- **打破 9 连回退** — Agent 终于停止触碰 constitution 文件
+- **弱断言问题关闭** — 完成了 learning→procedure→automation 三层升级，但工具有 7 个误报需要改进
+- **评审 7.6/10** — 分数下降主因是方向选择（继续测试维护而非推进核心功能），不是技术质量
+- **下次核心动作** — 处理目标状态决议，转向功能开发
