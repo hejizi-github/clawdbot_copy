@@ -1,0 +1,41 @@
+# Session 20260417-075625 — Loop detection n-gram dedup + format_judge_ci passed auto-compute (Phase 3 Session 25)
+
+修复了 loop detection 指标的两个 penalty 计算缺陷，并按上轮评审建议修复了 `format_judge_ci` 的 `passed` 默认值问题。
+
+## 核心改动
+
+### Loop detection n-gram 去重 + 位置覆盖计算
+
+**问题**：使用多个 n-gram 大小（默认 `[2, 3]`）时，重复 penalty 双重计算。以 `A B A B A B` 为例，旧实现：
+- 2-gram `(A,B)` x3 + `(B,A)` x2 → 6 repeated steps
+- 3-gram `(A,B,A)` x2 + `(B,A,B)` x2 → 6 repeated steps
+- 总计 12 repeated steps（超过 trace 总长 6），penalty 被 cap 到 0.9，score = 0.1
+
+**修复（两层）**：
+1. **长度去重**：如果短 pattern 是长 pattern 的连续子序列，移除短的。`(A,B)` 是 `(A,B,A)` 的子序列 → 被移除。
+2. **位置覆盖**：对保留的 patterns，追踪每个「额外出现」覆盖的位置集合，取并集计数。`(A,B,A)` 第二次出现覆盖 {2,3,4}，`(B,A,B)` 第二次覆盖 {3,4,5}，并集 = {2,3,4,5} = 4 unique positions。
+
+修复后 score = 1 - 4/6 = 0.3333，合理反映「2 个多余循环」的浪费程度。
+
+新增辅助函数：`_is_subpattern()`、`_deduplicate_loops()`。
+
+### format_judge_ci passed 默认值
+
+`passed: bool = True` → `passed: bool | None = None`，None 时自动计算 `result.overall_score >= threshold`。保持 CLI 入口的显式传参不受影响，但公共 API 现在 fail-closed 而非 fail-open。
+
+## 测试
+
++7 tests（309 → 316），全量通过，0 回归：
+- 4 个 loop dedup 测试：subsumed 2-gram 移除、independent 2-gram 保留、penalty 减少验证、单 n-gram 大小无去重
+- 3 个 passed auto-compute 测试：auto pass、auto fail、explicit override
+
+## 文件变更
+
+| 文件 | 改动 |
+|------|------|
+| `trajeval/metrics.py` | +`_is_subpattern`、`_deduplicate_loops`、位置追踪逻辑 |
+| `trajeval/ci_output.py` | `passed` 参数类型 `bool` → `bool | None`，加自动计算 |
+| `tests/test_metrics.py` | +4 dedup 测试，更新 fixture 测试断言 |
+| `tests/test_ci_output.py` | +3 passed auto-compute 测试 |
+
+<!-- meta: verdict:PENDING score:0 test_delta:+7 -->
