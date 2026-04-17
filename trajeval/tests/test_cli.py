@@ -1142,135 +1142,103 @@ class TestInputFormat:
         assert "Error" in result.output
 
 
-class TestEvalStore:
-    def test_store_creates_db_and_persists(self, tmp_path):
-        db = tmp_path / "results.db"
+class TestStoreAndHistory:
+    def test_eval_with_store_persists(self, tmp_path):
+        db_path = tmp_path / "test.db"
         runner = CliRunner()
         result = runner.invoke(main, [
             "eval", str(FIXTURES_DIR / "simple_trace.json"),
-            "--threshold", "0.3", "--store", str(db),
+            "--format", "json", "--threshold", "0.3",
+            "--store", "--db", str(db_path),
         ])
         assert result.exit_code == 0
-        assert db.exists()
-        assert "Stored as result #1" in result.output
+        assert db_path.exists()
 
-    def test_store_with_json_format_no_stored_message(self, tmp_path):
-        db = tmp_path / "results.db"
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "eval", str(FIXTURES_DIR / "simple_trace.json"),
-            "--threshold", "0.3", "--store", str(db), "--format", "json",
-        ])
-        assert result.exit_code == 0
-        assert "Stored as result" not in result.output
+        from trajeval.storage import EvalStore
+        store = EvalStore(db_path=db_path)
+        assert store.count() == 1
+        record = store.get_latest()
+        assert record is not None
         data = json.loads(result.output)
-        assert "overall_score" in data
+        assert record.trace_id == data["trace_id"]
+        assert record.overall_score == data["overall_score"]
+        store.close()
 
-    def test_store_multiple_evals_increment_ids(self, tmp_path):
-        db = tmp_path / "results.db"
+    def test_eval_without_store_no_db(self, tmp_path):
+        db_path = tmp_path / "should_not_exist.db"
         runner = CliRunner()
-        r1 = runner.invoke(main, [
+        result = runner.invoke(main, [
             "eval", str(FIXTURES_DIR / "simple_trace.json"),
-            "--threshold", "0.3", "--store", str(db),
+            "--format", "json", "--threshold", "0.3",
+            "--db", str(db_path),
         ])
-        r2 = runner.invoke(main, [
-            "eval", str(FIXTURES_DIR / "error_trace.json"),
-            "--threshold", "0.3", "--store", str(db),
-        ])
-        assert "result #1" in r1.output
-        assert "result #2" in r2.output
+        assert result.exit_code == 0
+        assert not db_path.exists()
 
-    def test_stored_result_retrievable_via_history(self, tmp_path):
-        db = tmp_path / "results.db"
+    def test_history_empty_store(self, tmp_path):
+        db_path = tmp_path / "empty.db"
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", str(db_path)])
+        assert result.exit_code == 0
+        assert "No evaluations stored" in result.output
+
+    def test_history_shows_stored_evals(self, tmp_path):
+        db_path = tmp_path / "test.db"
         runner = CliRunner()
         runner.invoke(main, [
             "eval", str(FIXTURES_DIR / "simple_trace.json"),
-            "--threshold", "0.3", "--store", str(db),
+            "--threshold", "0.3", "--store", "--db", str(db_path),
         ])
-        result = runner.invoke(main, ["history", str(db), "--format", "json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert len(data) == 1
-        assert data[0]["overall_score"] > 0
-
-
-class TestHistoryCommand:
-    def _seed_db(self, db_path, trace_count=3):
-        from trajeval.metrics import EvalReport, MetricResult
-        from trajeval.storage import ResultStore
-        store = ResultStore(db_path)
-        for i in range(trace_count):
-            score = round(0.5 + (i / max(trace_count - 1, 1)) * 0.4, 4)
-            report = EvalReport(
-                trace_id=f"trace-{i:03d}",
-                metrics=[MetricResult(name="step_efficiency", score=score, passed=True)],
-                overall_score=score,
-                passed=True,
-                timestamp=1000.0 + i * 100,
-            )
-            store.store_eval(report, agent_name="test-agent", source_file=f"trace_{i}.json")
-        store.close()
-
-    def test_history_table_output(self, tmp_path):
-        db = tmp_path / "results.db"
-        self._seed_db(db)
-        runner = CliRunner()
-        result = runner.invoke(main, ["history", str(db)])
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "error_trace.json"),
+            "--threshold", "0.3", "--store", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, ["history", "--db", str(db_path)])
         assert result.exit_code == 0
         assert "Evaluation History" in result.output
-        assert "trace-000" in result.output
+        assert "2/2" in result.output
 
-    def test_history_json_output(self, tmp_path):
-        db = tmp_path / "results.db"
-        self._seed_db(db)
+    def test_history_json_format(self, tmp_path):
+        db_path = tmp_path / "test.db"
         runner = CliRunner()
-        result = runner.invoke(main, ["history", str(db), "--format", "json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert len(data) == 3
-
-    def test_history_filter_by_trace_id(self, tmp_path):
-        db = tmp_path / "results.db"
-        self._seed_db(db)
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "history", str(db), "--trace-id", "trace-001", "--format", "json",
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3", "--store", "--db", str(db_path),
         ])
+        result = runner.invoke(main, [
+            "history", "--db", str(db_path), "--format", "json",
+        ])
+        assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 1
-        assert data[0]["trace_id"] == "trace-001"
-
-    def test_history_filter_by_agent(self, tmp_path):
-        db = tmp_path / "results.db"
-        self._seed_db(db)
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "history", str(db), "--agent", "nonexistent",
-        ])
-        assert result.exit_code == 0
-        assert "No results found" in result.output
+        assert "trace_id" in data[0]
+        assert "overall_score" in data[0]
+        assert "passed" in data[0]
 
     def test_history_limit(self, tmp_path):
-        db = tmp_path / "results.db"
-        self._seed_db(db, trace_count=10)
+        db_path = tmp_path / "test.db"
         runner = CliRunner()
+        for _ in range(5):
+            runner.invoke(main, [
+                "eval", str(FIXTURES_DIR / "simple_trace.json"),
+                "--threshold", "0.3", "--store", "--db", str(db_path),
+            ])
         result = runner.invoke(main, [
-            "history", str(db), "--limit", "3", "--format", "json",
+            "history", "--db", str(db_path), "--format", "json", "--limit", "2",
         ])
         data = json.loads(result.output)
-        assert len(data) == 3
+        assert len(data) == 2
 
-    def test_history_empty_db(self, tmp_path):
-        db = tmp_path / "results.db"
-        from trajeval.storage import ResultStore
-        store = ResultStore(db)
-        store.close()
+    def test_store_preserves_agent_and_task(self, tmp_path):
+        db_path = tmp_path / "test.db"
         runner = CliRunner()
-        result = runner.invoke(main, ["history", str(db)])
-        assert result.exit_code == 0
-        assert "No results found" in result.output
-
-    def test_history_nonexistent_db_exit_2(self):
-        runner = CliRunner()
-        result = runner.invoke(main, ["history", "/nonexistent/db.sqlite"])
-        assert result.exit_code == 2
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3", "--store", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "history", "--db", str(db_path), "--format", "json",
+        ])
+        data = json.loads(result.output)
+        assert data[0]["agent_name"] == "test-agent"
+        assert data[0]["task"] == "Summarize the quarterly report"

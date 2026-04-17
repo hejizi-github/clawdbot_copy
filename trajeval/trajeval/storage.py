@@ -9,145 +9,152 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from .metrics import EvalReport, MetricResult
+from .metrics import EvalReport
 
 
-class StoredResult(BaseModel):
+DEFAULT_DB_PATH = Path.home() / ".trajeval" / "history.db"
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    overall_score REAL NOT NULL,
+    passed INTEGER NOT NULL,
+    metrics_json TEXT NOT NULL,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    agent_name TEXT NOT NULL DEFAULT '',
+    task TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_evaluations_trace_id ON evaluations(trace_id);
+CREATE INDEX IF NOT EXISTS idx_evaluations_timestamp ON evaluations(timestamp);
+"""
+
+
+class EvalRecord(BaseModel):
     id: int
     trace_id: str
-    agent_name: str
+    timestamp: float
     overall_score: float
     passed: bool
-    metrics: list[MetricResult]
-    config_json: dict
-    timestamp: float
-    source_file: str
+    metrics_json: str
+    config_json: str = "{}"
+    agent_name: str = ""
+    task: str = ""
 
 
-class ResultStore:
-    """Persistent storage for trajeval evaluation results."""
-
-    def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
+class EvalStore:
+    def __init__(self, db_path: Path | str | None = None):
+        self.db_path = Path(db_path) if db_path else DEFAULT_DB_PATH
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
-        self._ensure_schema()
 
-    def _get_conn(self) -> sqlite3.Connection:
+    def _connect(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = sqlite3.connect(str(self.db_path))
             self._conn.row_factory = sqlite3.Row
+            self._conn.executescript(_SCHEMA_SQL)
         return self._conn
 
-    def _ensure_schema(self) -> None:
-        conn = self._get_conn()
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS eval_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trace_id TEXT NOT NULL,
-                agent_name TEXT NOT NULL DEFAULT 'unknown',
-                overall_score REAL NOT NULL,
-                passed INTEGER NOT NULL,
-                metrics_json TEXT NOT NULL,
-                config_json TEXT NOT NULL DEFAULT '{}',
-                source_file TEXT NOT NULL DEFAULT '',
-                timestamp REAL NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_eval_trace_id
-            ON eval_results(trace_id)
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_eval_timestamp
-            ON eval_results(timestamp)
-        """)
-        conn.commit()
-
-    def store_eval(
-        self,
-        report: EvalReport,
-        agent_name: str = "unknown",
-        config: dict | None = None,
-        source_file: str = "",
-    ) -> int:
-        conn = self._get_conn()
-        ts = report.timestamp if report.timestamp is not None else time.time()
-        metrics_json = json.dumps([m.model_dump() for m in report.metrics])
-        config_json = json.dumps(config or {})
-        cursor = conn.execute(
-            """INSERT INTO eval_results
-               (trace_id, agent_name, overall_score, passed, metrics_json,
-                config_json, source_file, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                report.trace_id,
-                agent_name,
-                report.overall_score,
-                int(report.passed),
-                metrics_json,
-                config_json,
-                source_file,
-                ts,
-            ),
-        )
-        conn.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
-
-    def get_result(self, result_id: int) -> StoredResult | None:
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM eval_results WHERE id = ?", (result_id,)
-        ).fetchone()
-        if row is None:
-            return None
-        return self._row_to_stored(row)
-
-    def get_history(
-        self,
-        trace_id: str | None = None,
-        agent_name: str | None = None,
-        limit: int = 50,
-    ) -> list[StoredResult]:
-        conn = self._get_conn()
-        clauses: list[str] = []
-        params: list[object] = []
-        if trace_id is not None:
-            clauses.append("trace_id = ?")
-            params.append(trace_id)
-        if agent_name is not None:
-            clauses.append("agent_name = ?")
-            params.append(agent_name)
-
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = conn.execute(
-            f"SELECT * FROM eval_results {where} ORDER BY timestamp DESC LIMIT ?",
-            (*params, limit),
-        ).fetchall()
-        return [self._row_to_stored(r) for r in rows]
-
-    def count(self) -> int:
-        conn = self._get_conn()
-        row = conn.execute("SELECT COUNT(*) FROM eval_results").fetchone()
-        return row[0]
-
-    def close(self) -> None:
+    def close(self):
         if self._conn is not None:
             self._conn.close()
             self._conn = None
 
+    def save_eval(
+        self,
+        report: EvalReport,
+        agent_name: str = "",
+        task: str = "",
+        config: dict | None = None,
+    ) -> int:
+        conn = self._connect()
+        ts = report.timestamp if report.timestamp is not None else time.time()
+        metrics_json = json.dumps([m.model_dump() for m in report.metrics])
+        config_json = json.dumps(config or {})
+        cursor = conn.execute(
+            """INSERT INTO evaluations
+               (trace_id, timestamp, overall_score, passed, metrics_json, config_json, agent_name, task)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (report.trace_id, ts, report.overall_score, int(report.passed),
+             metrics_json, config_json, agent_name, task),
+        )
+        conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def get_eval(self, eval_id: int) -> EvalRecord | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM evaluations WHERE id = ?", (eval_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_record(row)
+
+    def get_by_trace_id(self, trace_id: str) -> list[EvalRecord]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM evaluations WHERE trace_id = ? ORDER BY timestamp DESC",
+            (trace_id,),
+        ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def list_evals(self, limit: int = 20, offset: int = 0) -> list[EvalRecord]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM evaluations ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def get_latest(self, agent_name: str | None = None) -> EvalRecord | None:
+        conn = self._connect()
+        if agent_name:
+            row = conn.execute(
+                "SELECT * FROM evaluations WHERE agent_name = ? ORDER BY timestamp DESC LIMIT 1",
+                (agent_name,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM evaluations ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_record(row)
+
+    def count(self) -> int:
+        conn = self._connect()
+        row = conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()
+        return row[0]
+
+    def delete_eval(self, eval_id: int) -> bool:
+        conn = self._connect()
+        cursor = conn.execute("DELETE FROM evaluations WHERE id = ?", (eval_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
     @staticmethod
-    def _row_to_stored(row: sqlite3.Row) -> StoredResult:
-        metrics_raw = json.loads(row["metrics_json"])
-        metrics = [MetricResult(**m) for m in metrics_raw]
-        config = json.loads(row["config_json"])
-        return StoredResult(
+    def _row_to_record(row: sqlite3.Row) -> EvalRecord:
+        return EvalRecord(
             id=row["id"],
             trace_id=row["trace_id"],
-            agent_name=row["agent_name"],
+            timestamp=row["timestamp"],
             overall_score=row["overall_score"],
             passed=bool(row["passed"]),
+            metrics_json=row["metrics_json"],
+            config_json=row["config_json"],
+            agent_name=row["agent_name"],
+            task=row["task"],
+        )
+
+    def record_to_report(self, record: EvalRecord) -> EvalReport:
+        from .metrics import MetricResult
+        metrics_data = json.loads(record.metrics_json)
+        metrics = [MetricResult(**m) for m in metrics_data]
+        return EvalReport(
+            trace_id=record.trace_id,
             metrics=metrics,
-            config_json=config,
-            timestamp=row["timestamp"],
-            source_file=row["source_file"],
+            overall_score=record.overall_score,
+            passed=record.passed,
+            timestamp=record.timestamp,
         )

@@ -18,7 +18,7 @@ from .improvement import ImprovementReport, Priority, analyze_judge_results, ana
 from .ingester import IngestError, ingest_clawdbot_jsonl, ingest_json
 from .metrics import MetricConfig, evaluate
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
-from .storage import ResultStore
+from .storage import EvalStore
 
 console = Console()
 
@@ -76,8 +76,12 @@ def _load_trace(trace_file: Path, input_format: str):
     help="Show metric details in table output",
 )
 @click.option(
-    "--store", "store_path", type=click.Path(path_type=Path), default=None,
-    help="SQLite database path to persist evaluation results",
+    "--store/--no-store", default=False,
+    help="Persist evaluation result to SQLite history",
+)
+@click.option(
+    "--db", type=click.Path(path_type=Path), default=None,
+    help="SQLite database path (default: ~/.trajeval/history.db)",
 )
 def eval(
     trace_file: Path,
@@ -90,7 +94,8 @@ def eval(
     latency_budget: float | None,
     similarity_threshold: float,
     details: bool,
-    store_path: Path | None,
+    store: bool,
+    db: Path | None,
 ):
     """Evaluate an agent execution trace with deterministic metrics."""
     try:
@@ -110,17 +115,15 @@ def eval(
     )
     report = evaluate(trace, config)
 
-    if store_path is not None:
-        store = ResultStore(store_path)
-        result_id = store.store_eval(
+    if store:
+        eval_store = EvalStore(db_path=db)
+        eval_store.save_eval(
             report,
             agent_name=trace.agent_name,
+            task=trace.task,
             config=config.model_dump(),
-            source_file=str(trace_file),
         )
-        store.close()
-        if fmt == "table":
-            console.print(f"[dim]Stored as result #{result_id} in {store_path}[/dim]")
+        eval_store.close()
 
     if fmt == "json":
         result = {
@@ -431,71 +434,6 @@ def calibrate(annotations_file: Path, judgments_file: Path, fmt: str, threshold:
 
 
 @main.command()
-@click.argument("db_file", type=click.Path(exists=True, path_type=Path))
-@click.option("--trace-id", default=None, help="Filter by trace ID")
-@click.option("--agent", default=None, help="Filter by agent name")
-@click.option("--limit", type=int, default=20, help="Max results to show (default 20)")
-@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
-def history(db_file: Path, trace_id: str | None, agent: str | None, limit: int, fmt: str):
-    """View stored evaluation results from a SQLite database."""
-    store = ResultStore(db_file)
-    results = store.get_history(trace_id=trace_id, agent_name=agent, limit=limit)
-    store.close()
-
-    if not results:
-        console.print("[yellow]No results found[/yellow]")
-        sys.exit(0)
-
-    if fmt == "json":
-        output = [
-            {
-                "id": r.id,
-                "trace_id": r.trace_id,
-                "agent_name": r.agent_name,
-                "overall_score": r.overall_score,
-                "passed": r.passed,
-                "source_file": r.source_file,
-                "timestamp": r.timestamp,
-                "metrics": [m.model_dump() for m in r.metrics],
-            }
-            for r in results
-        ]
-        click.echo(json.dumps(output, indent=2))
-    else:
-        _print_history(results)
-
-
-def _print_history(results):
-    from datetime import datetime, timezone
-
-    table = Table(title=f"Evaluation History ({len(results)} results)")
-    table.add_column("#", style="dim", justify="right")
-    table.add_column("Trace ID", style="cyan")
-    table.add_column("Agent", style="dim")
-    table.add_column("Score", justify="right")
-    table.add_column("Status", justify="center")
-    table.add_column("Source", style="dim")
-    table.add_column("Time", style="dim")
-
-    for r in results:
-        score_color = "green" if r.passed else "red"
-        status = "[green]PASS[/green]" if r.passed else "[red]FAIL[/red]"
-        ts = datetime.fromtimestamp(r.timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-        source = Path(r.source_file).name if r.source_file else ""
-        table.add_row(
-            str(r.id),
-            r.trace_id[:20],
-            r.agent_name,
-            f"[{score_color}]{r.overall_score:.2f}[/{score_color}]",
-            status,
-            source,
-            ts,
-        )
-
-    console.print(table)
-
-
-@main.command()
 @click.argument("eval_files", nargs=-1, required=False, type=click.Path(exists=True, path_type=Path))
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
 @click.option(
@@ -550,6 +488,70 @@ def improve(eval_files: tuple[Path, ...], fmt: str, judge_files: tuple[Path, ...
         click.echo(json.dumps(merged.model_dump(), indent=2))
     else:
         _print_improvement_report(merged)
+
+
+@main.command()
+@click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
+@click.option("--limit", type=int, default=20, help="Maximum number of records to show")
+@click.option(
+    "--db", type=click.Path(path_type=Path), default=None,
+    help="SQLite database path (default: ~/.trajeval/history.db)",
+)
+@click.option("--agent", default=None, help="Filter by agent name")
+def history(fmt: str, limit: int, db: Path | None, agent: str | None):
+    """Show evaluation history from the local store."""
+    import datetime
+
+    eval_store = EvalStore(db_path=db)
+    total = eval_store.count()
+
+    if total == 0:
+        console.print("[dim]No evaluations stored yet. Use --store with eval to persist results.[/dim]")
+        eval_store.close()
+        return
+
+    records = eval_store.list_evals(limit=limit)
+    if agent:
+        records = [r for r in records if r.agent_name == agent]
+
+    if fmt == "json":
+        output = [
+            {
+                "id": r.id,
+                "trace_id": r.trace_id,
+                "timestamp": r.timestamp,
+                "overall_score": r.overall_score,
+                "passed": r.passed,
+                "agent_name": r.agent_name,
+                "task": r.task,
+            }
+            for r in records
+        ]
+        click.echo(json.dumps(output, indent=2))
+    else:
+        table = Table(title=f"Evaluation History ({len(records)}/{total})")
+        table.add_column("ID", style="dim", justify="right")
+        table.add_column("Trace ID", style="cyan")
+        table.add_column("Agent")
+        table.add_column("Score", justify="right")
+        table.add_column("Status", justify="center")
+        table.add_column("Time")
+
+        for r in records:
+            score_color = "green" if r.passed else "red"
+            status = "[green]PASS[/green]" if r.passed else "[red]FAIL[/red]"
+            ts = datetime.datetime.fromtimestamp(r.timestamp).strftime("%Y-%m-%d %H:%M")
+            table.add_row(
+                str(r.id),
+                r.trace_id[:20],
+                r.agent_name or "[dim]-[/dim]",
+                f"[{score_color}]{r.overall_score:.2f}[/{score_color}]",
+                status,
+                ts,
+            )
+        console.print(table)
+
+    eval_store.close()
 
 
 def _print_improvement_report(report):
