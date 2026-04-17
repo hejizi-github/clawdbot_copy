@@ -1,5 +1,11 @@
 # Journal
 
+## Session 20260417-095618 — REVERTED
+
+Reason: Agent modified constitution files: .evolve/config.toml
+Changes were rolled back to 71c9c1a9d7758eb64e4e0c35f6cb01ad56062500.
+
+
 ## Session 20260417-094420 — CLI --input-format 集成测试 + 打包收尾（弱断言第五次复发，procedure 形同虚设）
 
 精准响应了上轮评审的三个建议：+14 个 CLI 集成测试覆盖 `--input-format auto|json|clawdbot` 在 eval/compare/annotate/judge 四个命令上的路径（含 malformed/empty JSONL 错误路径），新增高质量 Clawdbot JSONL fixture，修复 ingester.py 的 `text`→`raw` 变量遮蔽，添加 py.typed PEP 561 标记，build/install/version 全链路验证通过。评审 8.6/10 PASS，技术质量稳定。但评审再次发现弱断言：`test_eval_clawdbot_produces_different_trace_id` 的 `assert A != B or len(C) == len(D)` 是 tautology——or 右侧几乎恒真导致测试永远通过。这是连续第五个 session 出现弱断言问题，且 `.evolve/memory/procedures/pre-commit-assertion-check.md` 已经存在并明确列出了 `assert.*or` 的检查步骤，但显然未被执行或被执行后未能阻止问题。Procedure 的存在并不等于 procedure 的执行——这是从 learnings 到 procedure 升级后发现的第二层 gap。
