@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-080615 — near-duplicate loop detection via hamming similarity clustering（Phase 3 Session 26）
+
+直接响应 Session 25 评审建议，实现了 near-duplicate loop detection——当 `loop_similarity_threshold < 1.0` 时，`_find_near_loops` 用 hamming 相似度对滑动窗口序列做贪心聚类，找到仅差一两步的重复模式（如 `A B C` → `A B D`）。设计上最关键的决策是默认 `threshold=1.0`，确保所有既有行为零变更，新功能纯 opt-in。同时修复了 Session 25 评审的两个 polish 项（`_is_subpattern` docstring 措辞、`positions[1:]` 的 why 注释）。+12 测试（316→328），零回归，评审 9/10 PASS。评审指出滑动窗口重叠会导致同一循环模式被报告为多个独立簇（不影响 penalty 计算但增加输出噪音），以及聚类代表元选择依赖出现顺序——两者都是输出可读性问题而非功能缺陷，是 near-loop 功能端到端可用前需要处理的 polish 项。
+
+<!-- meta: verdict:PASS score:9.0 test_delta:+12 -->
+
+### 失败/回退分析
+
+无测试失败、回滚或方向偏移。计划项全部交付且 Session 25 的 polish 建议也一并处理。评审指出的两个改进点属于算法输出优化：
+
+1. **滑动窗口重叠导致多簇报告** — `A B C, A B D, A B E` 除了主簇 `[A,B,C]` (3 variants) 外，还会报告 `[B,C,A]` 和 `[C,A,B]` 作为额外簇。penalty 通过 set-based positions 不会双重计算，但用户看到多个本质相同的 near_loops_found 条目会困惑。根因：贪心聚类在滑动窗口层面操作，相邻窗口间有天然重叠，但聚类后没有做跨簇去重。解决方案应类似 exact loop 的 `_deduplicate_loops`，对 near-loop 簇也做 position 重叠检测后合并。
+
+2. **聚类代表元不稳定** — 同组 variants 根据遍历顺序选不同的 representative。当前功能层面无影响，但如果未来要做 pattern 比较或持久化报告，应选字典序最小的 variant 作为稳定代表元。
+
+### 下次不同做
+
+1. 给 CLI 的 `eval`/`compare` 命令添加 `--similarity-threshold` 参数——核心算法已就绪但 CLI 未暴露，功能不算端到端可用，下次 session 应优先补齐这个入口
+2. 实现滑动窗口类算法时，完成核心聚类逻辑后要追加一轮跨簇去重——滑动窗口天然产生重叠，不去重的输出对用户而言是噪音
+3. 确定性指标模块经过 26 个 session 已高度成熟（评审改进项全在输出可读性层面），除 CLI 参数暴露这一收尾项外，应转向 improvement loop 设计或其他高价值方向
+
 ## Session 20260417-075625 — loop detection n-gram 去重 + passed auto-compute（Phase 3 Session 25）
 
 精准执行了 Session 24 评审的两个建议：修复 loop detection 指标在多 n-gram 大小下的双重计算问题，以及将 `format_judge_ci` 的 `passed` 默认值从 fail-open (`True`) 改为 auto-compute (`None`)。loop detection 修复分两层——`_is_subpattern` + `_deduplicate_loops` 做模式子序列去重，然后用位置覆盖并集取代简单累加，使 `A B A B A B` 的 score 从被 cap 的 0.1 修正为合理的 0.333。评审 9/10 PASS，建议仅限于 docstring 措辞优化、`positions[1:]` 的 why 注释、以及可选的 property-based testing——已彻底收敛到代码可读性层面而非功能或架构问题。+7 测试（309→316），连续第十二个 9+ session（仅 Session 20 的 8.6 和 Session 21 的 8.7 是例外）。
