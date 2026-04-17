@@ -3,26 +3,26 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 9/10 — 直接响应 Session 25 评审建议，near-duplicate loop detection 是 agent 轨迹评估的实质性能力提升
-- 完成度 (25%): 8/10 — 核心功能完整且向后兼容，+12 测试覆盖全面；CLI 尚未暴露 `--similarity-threshold` 参数（Agent 自己也已标注为 next step）
-- 准确性 (20%): 8/10 — 算法正确，hamming similarity + greedy clustering 思路合理；贪心聚类的代表元取决于滑动窗口顺序，但对确定性输入结果一致，不构成 bug
-- 一致性 (15%): 9/10 — 遵循既有模式（config 参数 → 函数参数 → evaluate 集成），默认 1.0 确保零行为变更，命名风格一致
-- 副作用 (10%): 10/10 — 全部 328 测试通过，默认行为无变化，改动干净隔离
+- 方向正确性 (30%): 8/10 — 让 near-loop detection 从 CLI 端到端可用是合理的增量改进，但 trajeval 确定性指标已趋成熟，session log 自己也指出应转向更高价值方向
+- 完成度 (25%): 8/10 — 计划中三项（CLI 参数、cluster dedup、测试）全部交付，6 个新测试通过，但部分测试断言较弱（详见下方）
+- 准确性 (20%): 9/10 — dedup 算法逻辑正确：step coverage 重叠度计算、基于 min 较小集合的 >50% 阈值、lexicographic min 作为稳定代表均无问题；hamming similarity 实现也正确
+- 一致性 (15%): 9/10 — CLI 选项完全遵循已有 `--recovery-window` / `--latency-budget` 的模式，命名、默认值、help text 风格统一
+- 副作用 (10%): 10/10 — 328 条既有测试零回归，变更干净隔离在 metrics.py 和 cli.py 中
 
-**加权总分**: 9/10
+**加权总分**: 8.5/10
 
 **做得好的地方**:
-- 向后兼容设计出色：`loop_similarity_threshold=1.0` 默认值意味着所有既有行为完全不变，新功能是 opt-in
-- `_find_near_loops` 正确排除了 exact-only 单变体簇（`len(variants)==1 and rep in exact_patterns`），避免和 exact loop 重复计数
-- `repeated_positions` 用 set 管理，确保 exact 和 near-loop 的位置不会被双重惩罚
-- 测试设计覆盖了关键场景：threshold 开关、exact 不被重复报告、penalty 增加验证、config 端到端流通
-- Session 25 的 polish 建议（docstring 修正、why-comment）也一并处理了
+- `_deduplicate_near_loop_clusters()` 设计合理：先按 occurrences 降序排、用 step coverage 集合判重叠、吸收时合并 positions 并更新覆盖集，避免了 O(n^2) 的 pattern-pair 比较
+- 在 `for n in ngram_sizes` 循环内调用 cluster dedup，再在外层用 `_deduplicate_loops()` 做跨 n-gram-size 去重，两级去重策略清晰
+- 稳定代表选择 `min(cluster["variants"])` 简洁正确（tuple 的 lexicographic 比较）
+- CLI 两个命令（eval/compare）同步添加，没有遗漏
 
 **需要改进的地方**:
-- **滑动窗口重叠导致多簇报告**：对 `A B C, A B D, A B E` 序列，除了主簇 `[A,B,C]` (3 variants) 外，还会报告 `[B,C,A]` 和 `[C,A,B]` 作为额外 near-loop 簇。虽然 penalty 通过 set 不会双重计算，但用户看到 3 个独立的 near_loops_found 条目会困惑——它们本质上是同一个循环模式的不同窗口切片。建议后续对 near_loops_found 也做类似 `_deduplicate_loops` 的去重，或者至少在文档中说明这一行为
-- **聚类代表元选择不稳定**：同一组 variants 根据出现顺序会选不同的 representative 作为报告的 pattern。对功能无影响，但如果未来要做 pattern 比较或持久化报告，建议选择字典序最小的 variant 作为代表元
+- `test_similarity_threshold_flag_changes_output`（test_cli.py:180）断言 `assert loop_m is not None` 实际上永远为真（`next()` 找不到会抛 StopIteration，不会返回 None）。这个测试名暗示要验证"不同 threshold 产生不同输出"，但并未比较默认 threshold=1.0 和 0.5 的结果差异。建议：分别用 threshold=1.0 和 0.5 调用，断言 near_loops_found 在低阈值时出现、在高阈值时不出现
+- `test_similarity_threshold_flag_flows_through`（test_cli.py:563）同理，只断言了 `"metric_deltas" in data` 但未断言 exact 和 fuzzy 结果有实质差异。建议至少断言 loop_detection 的 delta 或 details 不同
+- `test_stable_representative_lexicographic`（test_metrics.py:796）和 `test_independent_near_clusters_both_kept`（test_metrics.py:813）使用 `if "near_loops_found" in result.details` 保护断言——虽然经分析两个测试的输入确实会触发 near loops，但条件守卫让测试在行为变化时会悄悄跳过断言而非失败。建议去掉 `if` 改为直接断言 key 存在
 
 **下次 session 的建议**:
-- **优先级 1**：给 CLI 的 `eval` / `compare` 命令添加 `--similarity-threshold` 参数，让这个功能端到端可用
-- **优先级 2**：考虑对 near-loop 的滑动窗口重叠簇做合并或去重，减少输出噪音
-- **可选**：补一个测试 case 验证独立 n-gram 的位置重叠场景（上次评审提到的 edge case）
+- Session log 自己提到"Consider shifting focus away from deterministic metrics"，评审同意这个判断——确定性指标模块已高度成熟（334 tests），继续打磨边际收益递减
+- 优先推进 LLM judge 集成测试或 improvement loop 设计，这些是 project-proposal.md 中尚未充分实现的高价值模块
+- 如果继续在 metrics 上工作，建议优先补强上述弱测试的断言，而非添加新功能
