@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-TEST_DIR="${1:-tests/}"
+TEST_DIR="${1:-trajeval/tests}"
 STRICT=0
 for arg in "$@"; do
     [ "$arg" = "--strict" ] && STRICT=1
