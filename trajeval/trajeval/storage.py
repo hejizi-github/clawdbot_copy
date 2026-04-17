@@ -1,4 +1,4 @@
-"""SQLite-backed result storage for evaluation history."""
+"""SQLite storage for persistent evaluation history."""
 
 from __future__ import annotations
 
@@ -6,76 +6,38 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Literal
 
-from pydantic import BaseModel, Field
-
-from .metrics import EvalReport
-from .scorer import JudgeResult
+from .metrics import EvalReport, MetricResult
 
 
-DEFAULT_DB_PATH = Path("trajeval.db")
+DEFAULT_DB_DIR = Path.home() / ".trajeval"
+DEFAULT_DB_PATH = DEFAULT_DB_DIR / "history.db"
 
-_SCHEMA_SQL = """
+_SCHEMA = """
 CREATE TABLE IF NOT EXISTS eval_results (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    trace_id    TEXT NOT NULL,
-    agent_name  TEXT NOT NULL DEFAULT 'unknown',
-    timestamp   REAL NOT NULL,
+    trace_id TEXT NOT NULL,
+    agent_name TEXT NOT NULL DEFAULT 'unknown',
+    timestamp REAL NOT NULL,
     overall_score REAL NOT NULL,
-    passed      INTEGER NOT NULL,
-    result_json TEXT NOT NULL
+    passed INTEGER NOT NULL,
+    metrics_json TEXT NOT NULL,
+    PRIMARY KEY (trace_id)
 );
 
-CREATE TABLE IF NOT EXISTS judge_results (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    trace_id    TEXT NOT NULL,
-    agent_name  TEXT NOT NULL DEFAULT 'unknown',
-    timestamp   REAL NOT NULL,
-    overall_score REAL NOT NULL,
-    passed      INTEGER NOT NULL,
-    model       TEXT NOT NULL DEFAULT '',
-    result_json TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_eval_trace ON eval_results(trace_id);
-CREATE INDEX IF NOT EXISTS idx_eval_agent ON eval_results(agent_name);
-CREATE INDEX IF NOT EXISTS idx_eval_ts ON eval_results(timestamp);
-CREATE INDEX IF NOT EXISTS idx_judge_trace ON judge_results(trace_id);
-CREATE INDEX IF NOT EXISTS idx_judge_agent ON judge_results(agent_name);
-CREATE INDEX IF NOT EXISTS idx_judge_ts ON judge_results(timestamp);
+CREATE INDEX IF NOT EXISTS idx_eval_agent_ts
+    ON eval_results (agent_name, timestamp DESC);
 """
 
 
-class StoredEval(BaseModel):
-    id: int
-    trace_id: str
-    agent_name: str
-    timestamp: float
-    overall_score: float
-    passed: bool
-    report: EvalReport
+class TrajevalDB:
+    """Thin wrapper around SQLite for storing evaluation results."""
 
-
-class StoredJudge(BaseModel):
-    id: int
-    trace_id: str
-    agent_name: str
-    timestamp: float
-    overall_score: float
-    passed: bool
-    model: str
-    result: JudgeResult
-
-
-class ResultStore:
-    """SQLite-backed persistent storage for eval and judge results."""
-
-    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH):
-        self.db_path = Path(db_path)
-        self._conn = sqlite3.connect(str(self.db_path))
+    def __init__(self, path: Path | str | None = None):
+        self.path = Path(path) if path else DEFAULT_DB_PATH
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self.path))
         self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA_SQL)
+        self._conn.executescript(_SCHEMA)
 
     def close(self) -> None:
         self._conn.close()
@@ -86,123 +48,73 @@ class ResultStore:
     def __exit__(self, *exc):
         self.close()
 
-    def save_eval(
-        self,
-        report: EvalReport,
-        agent_name: str = "unknown",
-    ) -> int:
-        ts = report.timestamp or time.time()
-        result_json = report.model_dump_json()
-        cursor = self._conn.execute(
-            "INSERT INTO eval_results (trace_id, agent_name, timestamp, overall_score, passed, result_json) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (report.trace_id, agent_name, ts, report.overall_score, int(report.passed), result_json),
+    def save_eval(self, report: EvalReport, agent_name: str = "unknown") -> None:
+        ts = report.timestamp if report.timestamp is not None else time.time()
+        metrics_json = json.dumps([m.model_dump() for m in report.metrics])
+        self._conn.execute(
+            """INSERT OR REPLACE INTO eval_results
+               (trace_id, agent_name, timestamp, overall_score, passed, metrics_json)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (report.trace_id, agent_name, ts, report.overall_score, int(report.passed), metrics_json),
         )
         self._conn.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
 
-    def save_judge(
-        self,
-        result: JudgeResult,
-        agent_name: str = "unknown",
-        passed: bool = False,
-    ) -> int:
-        ts = time.time()
-        result_json = result.model_dump_json()
-        cursor = self._conn.execute(
-            "INSERT INTO judge_results (trace_id, agent_name, timestamp, overall_score, passed, model, result_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (result.trace_id, agent_name, ts, result.overall_score, int(passed), result.model, result_json),
-        )
-        self._conn.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+    def load_eval(self, trace_id: str) -> EvalReport | None:
+        row = self._conn.execute(
+            "SELECT * FROM eval_results WHERE trace_id = ?", (trace_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_report(row)
 
     def list_evals(
-        self,
-        *,
-        agent_name: str | None = None,
-        failed_only: bool = False,
-        limit: int = 50,
-    ) -> list[StoredEval]:
-        clauses = []
-        params: list = []
+        self, agent_name: str | None = None, limit: int = 50
+    ) -> list[EvalReport]:
         if agent_name:
-            clauses.append("agent_name = ?")
-            params.append(agent_name)
-        if failed_only:
-            clauses.append("passed = 0")
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self._conn.execute(
-            f"SELECT * FROM eval_results {where} ORDER BY timestamp DESC LIMIT ?",
-            [*params, limit],
-        ).fetchall()
-        return [self._row_to_stored_eval(r) for r in rows]
+            rows = self._conn.execute(
+                "SELECT * FROM eval_results WHERE agent_name = ? ORDER BY timestamp DESC LIMIT ?",
+                (agent_name, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM eval_results ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [_row_to_report(r) for r in rows]
 
-    def list_judges(
-        self,
-        *,
-        agent_name: str | None = None,
-        model: str | None = None,
-        failed_only: bool = False,
-        limit: int = 50,
-    ) -> list[StoredJudge]:
-        clauses = []
-        params: list = []
+    def get_latest_baseline(self, agent_name: str) -> EvalReport | None:
+        row = self._conn.execute(
+            "SELECT * FROM eval_results WHERE agent_name = ? ORDER BY timestamp DESC LIMIT 1",
+            (agent_name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_report(row)
+
+    def delete_eval(self, trace_id: str) -> bool:
+        cursor = self._conn.execute(
+            "DELETE FROM eval_results WHERE trace_id = ?", (trace_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def count(self, agent_name: str | None = None) -> int:
         if agent_name:
-            clauses.append("agent_name = ?")
-            params.append(agent_name)
-        if model:
-            clauses.append("model = ?")
-            params.append(model)
-        if failed_only:
-            clauses.append("passed = 0")
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self._conn.execute(
-            f"SELECT * FROM judge_results {where} ORDER BY timestamp DESC LIMIT ?",
-            [*params, limit],
-        ).fetchall()
-        return [self._row_to_stored_judge(r) for r in rows]
-
-    def get_eval(self, result_id: int) -> StoredEval | None:
-        row = self._conn.execute(
-            "SELECT * FROM eval_results WHERE id = ?", (result_id,)
-        ).fetchone()
-        return self._row_to_stored_eval(row) if row else None
-
-    def get_judge(self, result_id: int) -> StoredJudge | None:
-        row = self._conn.execute(
-            "SELECT * FROM judge_results WHERE id = ?", (result_id,)
-        ).fetchone()
-        return self._row_to_stored_judge(row) if row else None
-
-    def count(self, table: Literal["eval", "judge"] = "eval") -> int:
-        tbl = "eval_results" if table == "eval" else "judge_results"
-        row = self._conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM eval_results WHERE agent_name = ?",
+                (agent_name,),
+            ).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) FROM eval_results").fetchone()
         return row[0]
 
-    @staticmethod
-    def _row_to_stored_eval(row: sqlite3.Row) -> StoredEval:
-        report = EvalReport.model_validate_json(row["result_json"])
-        return StoredEval(
-            id=row["id"],
-            trace_id=row["trace_id"],
-            agent_name=row["agent_name"],
-            timestamp=row["timestamp"],
-            overall_score=row["overall_score"],
-            passed=bool(row["passed"]),
-            report=report,
-        )
 
-    @staticmethod
-    def _row_to_stored_judge(row: sqlite3.Row) -> StoredJudge:
-        result = JudgeResult.model_validate_json(row["result_json"])
-        return StoredJudge(
-            id=row["id"],
-            trace_id=row["trace_id"],
-            agent_name=row["agent_name"],
-            timestamp=row["timestamp"],
-            overall_score=row["overall_score"],
-            passed=bool(row["passed"]),
-            model=row["model"],
-            result=result,
-        )
+def _row_to_report(row: sqlite3.Row) -> EvalReport:
+    metrics = [MetricResult(**m) for m in json.loads(row["metrics_json"])]
+    return EvalReport(
+        trace_id=row["trace_id"],
+        metrics=metrics,
+        overall_score=row["overall_score"],
+        passed=bool(row["passed"]),
+        timestamp=row["timestamp"],
+    )

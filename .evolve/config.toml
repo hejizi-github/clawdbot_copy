@@ -6,7 +6,7 @@ name = "agent-lab"
 description = "学习成熟 Agent 项目（clawdbot）的架构设计，调研 2025-2026 前沿 Agent 技术，自主决定并构建一个创新的 Agent 项目"
 
 [objective]
-goal = "Phase 1: 深入学习 clawdbot 源码架构，产出架构分析报告；Phase 2: 调研前沿 Agent 技术趋势，与 clawdbot 对比分析；Phase 3: 自主决定要构建什么，并迭代实现"
+goal = "Phase 3 持续迭代 trajeval：real-world trace format 支持扩展（OTLP）、PyPI packaging、LLM judge mock 测试覆盖、文档完善"
 
 [kpis]
 core = [

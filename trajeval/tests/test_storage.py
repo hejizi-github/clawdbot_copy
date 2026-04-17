@@ -1,4 +1,4 @@
-"""Tests for SQLite-backed result storage."""
+"""Tests for SQLite storage module."""
 
 from __future__ import annotations
 
@@ -7,206 +7,184 @@ import time
 import pytest
 
 from trajeval.metrics import EvalReport, MetricResult
-from trajeval.scorer import JudgeDimension, JudgeResult
-from trajeval.storage import ResultStore
+from trajeval.storage import TrajevalDB
 
 
-@pytest.fixture
-def store(tmp_path):
-    db_path = tmp_path / "test.db"
-    with ResultStore(db_path) as s:
-        yield s
-
-
-@pytest.fixture
-def sample_eval_report():
+def _make_report(
+    trace_id: str = "trace-001",
+    score: float = 0.85,
+    passed: bool = True,
+    timestamp: float | None = None,
+) -> EvalReport:
     return EvalReport(
-        trace_id="eval-trace-001",
+        trace_id=trace_id,
+        overall_score=score,
+        passed=passed,
+        timestamp=timestamp or time.time(),
         metrics=[
-            MetricResult(name="step_efficiency", score=0.8, passed=True, details={"actual": 5}),
-            MetricResult(name="tool_accuracy", score=0.6, passed=False, details={}),
+            MetricResult(name="step_efficiency", score=0.9, passed=True, details={"steps": 5}),
+            MetricResult(name="tool_accuracy", score=0.8, passed=True, details={"correct": 4, "total": 5}),
         ],
-        overall_score=0.7,
-        passed=True,
-        timestamp=1700000000.0,
     )
 
 
-@pytest.fixture
-def sample_judge_result():
-    return JudgeResult(
-        trace_id="judge-trace-001",
-        dimensions=[
-            JudgeDimension(name="task_completion", score=4, explanation="Good"),
-            JudgeDimension(name="reasoning_quality", score=3, explanation="OK"),
-        ],
-        overall_score=0.7,
-        model="claude-sonnet-4-6",
-    )
+class TestSaveAndLoad:
+    def test_roundtrip(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        report = _make_report(timestamp=1000.0)
+        with TrajevalDB(db_path) as db:
+            db.save_eval(report, agent_name="my-agent")
+            loaded = db.load_eval("trace-001")
 
+        assert loaded is not None
+        assert loaded.trace_id == "trace-001"
+        assert loaded.overall_score == 0.85
+        assert loaded.passed is True
+        assert loaded.timestamp == 1000.0
+        assert len(loaded.metrics) == 2
+        assert loaded.metrics[0].name == "step_efficiency"
+        assert loaded.metrics[0].score == 0.9
+        assert loaded.metrics[0].details == {"steps": 5}
 
-class TestSaveAndRetrieveEval:
-    def test_save_returns_id(self, store, sample_eval_report):
-        row_id = store.save_eval(sample_eval_report, agent_name="test-agent")
-        assert isinstance(row_id, int)
-        assert row_id >= 1
+    def test_load_missing_returns_none(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            assert db.load_eval("nonexistent") is None
 
-    def test_round_trip(self, store, sample_eval_report):
-        row_id = store.save_eval(sample_eval_report, agent_name="test-agent")
-        stored = store.get_eval(row_id)
-        assert stored is not None
-        assert stored.trace_id == "eval-trace-001"
-        assert stored.agent_name == "test-agent"
-        assert stored.overall_score == 0.7
-        assert stored.passed is True
-        assert stored.report.trace_id == "eval-trace-001"
-        assert len(stored.report.metrics) == 2
-        assert stored.report.metrics[0].name == "step_efficiency"
+    def test_upsert_overwrites(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(score=0.5, passed=False), agent_name="a")
+            db.save_eval(_make_report(score=0.9, passed=True), agent_name="a")
+            loaded = db.load_eval("trace-001")
 
-    def test_get_nonexistent_returns_none(self, store):
-        assert store.get_eval(999) is None
+        assert loaded is not None
+        assert loaded.overall_score == 0.9
+        assert loaded.passed is True
 
-    def test_multiple_saves_get_unique_ids(self, store, sample_eval_report):
-        id1 = store.save_eval(sample_eval_report, agent_name="a")
-        id2 = store.save_eval(sample_eval_report, agent_name="b")
-        assert id1 != id2
+    def test_metrics_details_preserved(self, tmp_path):
+        report = _make_report()
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(report, agent_name="a")
+            loaded = db.load_eval("trace-001")
 
+        assert loaded is not None
+        assert loaded.metrics[1].details == {"correct": 4, "total": 5}
 
-class TestSaveAndRetrieveJudge:
-    def test_save_returns_id(self, store, sample_judge_result):
-        row_id = store.save_judge(sample_judge_result, agent_name="test-agent", passed=True)
-        assert isinstance(row_id, int)
-        assert row_id >= 1
+    def test_default_timestamp_when_none(self, tmp_path):
+        report = _make_report(timestamp=None)
+        report.timestamp = None
+        before = time.time()
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(report, agent_name="a")
+            loaded = db.load_eval("trace-001")
+        after = time.time()
 
-    def test_round_trip(self, store, sample_judge_result):
-        row_id = store.save_judge(sample_judge_result, agent_name="judge-agent", passed=True)
-        stored = store.get_judge(row_id)
-        assert stored is not None
-        assert stored.trace_id == "judge-trace-001"
-        assert stored.agent_name == "judge-agent"
-        assert stored.overall_score == 0.7
-        assert stored.passed is True
-        assert stored.model == "claude-sonnet-4-6"
-        assert len(stored.result.dimensions) == 2
-        assert stored.result.dimensions[0].name == "task_completion"
-        assert stored.result.dimensions[0].score == 4
-
-    def test_get_nonexistent_returns_none(self, store):
-        assert store.get_judge(999) is None
-
-    def test_passed_false_stored_correctly(self, store, sample_judge_result):
-        row_id = store.save_judge(sample_judge_result, passed=False)
-        stored = store.get_judge(row_id)
-        assert stored is not None
-        assert stored.passed is False
+        assert loaded is not None
+        assert before <= loaded.timestamp <= after
 
 
 class TestListEvals:
-    def _make_report(self, trace_id: str, score: float, passed: bool, ts: float) -> EvalReport:
-        return EvalReport(
-            trace_id=trace_id,
-            metrics=[MetricResult(name="m", score=min(score, 1.0), passed=passed)],
-            overall_score=score,
-            passed=passed,
-            timestamp=ts,
-        )
+    def test_list_all(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            for i in range(5):
+                db.save_eval(
+                    _make_report(trace_id=f"t-{i}", timestamp=1000.0 + i),
+                    agent_name="agent-a",
+                )
+            results = db.list_evals()
 
-    def test_list_empty(self, store):
-        assert store.list_evals() == []
+        assert len(results) == 5
+        assert results[0].trace_id == "t-4"
+        assert results[4].trace_id == "t-0"
 
-    def test_list_returns_all(self, store):
-        store.save_eval(self._make_report("t1", 0.8, True, 100.0), agent_name="a")
-        store.save_eval(self._make_report("t2", 0.5, False, 200.0), agent_name="b")
-        results = store.list_evals()
+    def test_list_filtered_by_agent(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(trace_id="a1"), agent_name="alpha")
+            db.save_eval(_make_report(trace_id="a2"), agent_name="alpha")
+            db.save_eval(_make_report(trace_id="b1"), agent_name="beta")
+            results = db.list_evals(agent_name="alpha")
+
         assert len(results) == 2
-        assert results[0].trace_id == "t2"  # most recent first
-        assert results[1].trace_id == "t1"
+        trace_ids = {r.trace_id for r in results}
+        assert trace_ids == {"a1", "a2"}
 
-    def test_filter_by_agent(self, store):
-        store.save_eval(self._make_report("t1", 0.8, True, 100.0), agent_name="alpha")
-        store.save_eval(self._make_report("t2", 0.5, False, 200.0), agent_name="beta")
-        results = store.list_evals(agent_name="alpha")
-        assert len(results) == 1
-        assert results[0].agent_name == "alpha"
+    def test_list_respects_limit(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            for i in range(10):
+                db.save_eval(
+                    _make_report(trace_id=f"t-{i}", timestamp=1000.0 + i),
+                    agent_name="a",
+                )
+            results = db.list_evals(limit=3)
 
-    def test_filter_failed_only(self, store):
-        store.save_eval(self._make_report("t1", 0.8, True, 100.0), agent_name="a")
-        store.save_eval(self._make_report("t2", 0.4, False, 200.0), agent_name="a")
-        results = store.list_evals(failed_only=True)
-        assert len(results) == 1
-        assert results[0].passed is False
-
-    def test_limit(self, store):
-        for i in range(10):
-            store.save_eval(
-                self._make_report(f"t{i}", 0.5, True, float(i)),
-                agent_name="a",
-            )
-        results = store.list_evals(limit=3)
         assert len(results) == 3
 
-    def test_combined_filters(self, store):
-        store.save_eval(self._make_report("t1", 0.8, True, 100.0), agent_name="alpha")
-        store.save_eval(self._make_report("t2", 0.3, False, 200.0), agent_name="alpha")
-        store.save_eval(self._make_report("t3", 0.2, False, 300.0), agent_name="beta")
-        results = store.list_evals(agent_name="alpha", failed_only=True)
-        assert len(results) == 1
-        assert results[0].trace_id == "t2"
+    def test_list_empty_db(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            assert db.list_evals() == []
 
 
-class TestListJudges:
-    def _make_result(self, trace_id: str, score: float, model: str) -> JudgeResult:
-        return JudgeResult(
-            trace_id=trace_id,
-            dimensions=[JudgeDimension(name="d", score=3, explanation="ok")],
-            overall_score=score,
-            model=model,
-        )
+class TestBaseline:
+    def test_latest_baseline(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(trace_id="old", score=0.6, timestamp=100.0), agent_name="bot")
+            db.save_eval(_make_report(trace_id="new", score=0.9, timestamp=200.0), agent_name="bot")
+            baseline = db.get_latest_baseline("bot")
 
-    def test_list_empty(self, store):
-        assert store.list_judges() == []
+        assert baseline is not None
+        assert baseline.trace_id == "new"
+        assert baseline.overall_score == 0.9
 
-    def test_filter_by_model(self, store):
-        store.save_judge(self._make_result("t1", 0.8, "claude-sonnet-4-6"), passed=True)
-        store.save_judge(self._make_result("t2", 0.6, "gpt-4o"), passed=True)
-        results = store.list_judges(model="gpt-4o")
-        assert len(results) == 1
-        assert results[0].model == "gpt-4o"
-
-    def test_filter_by_agent_and_failed(self, store):
-        store.save_judge(self._make_result("t1", 0.8, "m"), agent_name="a", passed=True)
-        store.save_judge(self._make_result("t2", 0.3, "m"), agent_name="a", passed=False)
-        store.save_judge(self._make_result("t3", 0.2, "m"), agent_name="b", passed=False)
-        results = store.list_judges(agent_name="a", failed_only=True)
-        assert len(results) == 1
-        assert results[0].trace_id == "t2"
+    def test_baseline_missing_agent(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(), agent_name="exists")
+            assert db.get_latest_baseline("missing") is None
 
 
-class TestCount:
-    def test_count_empty(self, store):
-        assert store.count("eval") == 0
-        assert store.count("judge") == 0
+class TestDeleteAndCount:
+    def test_delete(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(trace_id="del-me"), agent_name="a")
+            assert db.delete_eval("del-me") is True
+            assert db.load_eval("del-me") is None
 
-    def test_count_after_inserts(self, store, sample_eval_report, sample_judge_result):
-        store.save_eval(sample_eval_report)
-        store.save_eval(sample_eval_report)
-        store.save_judge(sample_judge_result, passed=True)
-        assert store.count("eval") == 2
-        assert store.count("judge") == 1
+    def test_delete_nonexistent(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            assert db.delete_eval("nope") is False
+
+    def test_count_all(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            assert db.count() == 0
+            db.save_eval(_make_report(trace_id="t1"), agent_name="a")
+            db.save_eval(_make_report(trace_id="t2"), agent_name="b")
+            assert db.count() == 2
+
+    def test_count_by_agent(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(trace_id="t1"), agent_name="alpha")
+            db.save_eval(_make_report(trace_id="t2"), agent_name="alpha")
+            db.save_eval(_make_report(trace_id="t3"), agent_name="beta")
+            assert db.count(agent_name="alpha") == 2
+            assert db.count(agent_name="beta") == 1
 
 
-class TestContextManager:
-    def test_creates_db_file(self, tmp_path):
-        db_path = tmp_path / "ctx.db"
-        assert not db_path.exists()
-        with ResultStore(db_path) as store:
-            assert db_path.exists()
+class TestDBLifecycle:
+    def test_creates_parent_directories(self, tmp_path):
+        deep_path = tmp_path / "a" / "b" / "c" / "test.db"
+        with TrajevalDB(deep_path) as db:
+            db.save_eval(_make_report(), agent_name="a")
+        assert deep_path.exists()
 
-    def test_usable_after_reopen(self, tmp_path, sample_eval_report):
-        db_path = tmp_path / "reopen.db"
-        with ResultStore(db_path) as store:
-            store.save_eval(sample_eval_report, agent_name="persist")
-        with ResultStore(db_path) as store:
-            results = store.list_evals()
-            assert len(results) == 1
-            assert results[0].agent_name == "persist"
+    def test_persistence_across_connections(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        with TrajevalDB(db_path) as db:
+            db.save_eval(_make_report(trace_id="persist"), agent_name="a")
+
+        with TrajevalDB(db_path) as db:
+            loaded = db.load_eval("persist")
+        assert loaded is not None
+        assert loaded.trace_id == "persist"
+
+    def test_context_manager(self, tmp_path):
+        with TrajevalDB(tmp_path / "test.db") as db:
+            db.save_eval(_make_report(), agent_name="a")
+            assert db.count() == 1
