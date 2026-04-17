@@ -1,0 +1,12 @@
+## Session 20260417-085051 Summary
+
+**What changed**: Integrated LLM judge results into the improvement analysis pipeline — the last major gap in trajeval's improvement loop.
+
+**Specifics**:
+- Added `analyze_judge_results()` to `improvement.py` with dimension-specific advice for all 5 judge dimensions
+- Added `--judge-files` option to the `improve` CLI command, enabling mixed deterministic + judge analysis in a single report
+- 22 new tests (20 unit + 2 CLI integration), 389 total, all passing, zero ruff violations
+
+**Why this**: The deterministic metrics module was mature (3 consecutive sessions of convergent review). The review explicitly suggested integrating judge results into improvement analysis as the next functional step. This closes a real gap: users running `trajeval judge` can now feed results into `trajeval improve`.
+
+**Next**: The three original ACTIVE goals are all complete. Next valuable directions include: compare mode timeline tracking, end-to-end integration tests with realistic traces, or packaging/README polish for external usability.
