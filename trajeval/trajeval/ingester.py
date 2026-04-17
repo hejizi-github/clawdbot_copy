@@ -200,6 +200,172 @@ def _compute_durations_from_timestamps(steps: list[TraceStep]) -> None:
                 steps[i].duration_ms = float(next_ts - ts)
 
 
+def ingest_otlp(source: str | Path | dict) -> AgentTrace:
+    """Ingest an OpenTelemetry OTLP JSON export into AgentTrace.
+
+    Supports the standard OTLP JSON trace format with GenAI semantic conventions.
+    """
+    raw = _load_raw(source)
+    return _parse_otlp(raw)
+
+
+def _parse_otlp(raw: dict) -> AgentTrace:
+    if not isinstance(raw, dict):
+        raise IngestError(f"Expected dict, got {type(raw).__name__}")
+
+    resource_spans = raw.get("resourceSpans", [])
+    if not isinstance(resource_spans, list):
+        raise IngestError(f"'resourceSpans' must be a list, got {type(resource_spans).__name__}")
+    if not resource_spans:
+        raise IngestError("No resourceSpans found in OTLP data")
+
+    all_spans: list[dict] = []
+    resource_attrs: dict[str, str] = {}
+
+    for rs in resource_spans:
+        res = rs.get("resource", {})
+        for attr in res.get("attributes", []):
+            resource_attrs[attr["key"]] = _otlp_attr_value(attr.get("value", {}))
+
+        for ss in rs.get("scopeSpans", []):
+            for span in ss.get("spans", []):
+                all_spans.append(span)
+
+    if not all_spans:
+        raise IngestError("No spans found in OTLP data")
+
+    trace_id = all_spans[0].get("traceId", str(uuid.uuid4()))
+
+    all_spans.sort(key=lambda s: int(s.get("startTimeUnixNano", "0")))
+
+    parent_to_children: dict[str, list[dict]] = {}
+    for span in all_spans:
+        pid = span.get("parentSpanId", "")
+        parent_to_children.setdefault(pid, []).append(span)
+
+    steps: list[TraceStep] = []
+    agent_name = resource_attrs.get("service.name", "unknown")
+    task = ""
+
+    for span in all_spans:
+        attrs = _otlp_span_attrs(span)
+        start_ns = int(span.get("startTimeUnixNano", "0"))
+        end_ns = int(span.get("endTimeUnixNano", "0"))
+        duration_ms = (end_ns - start_ns) / 1_000_000 if end_ns > start_ns else 0.0
+
+        is_genai = any(k.startswith("gen_ai.") for k in attrs)
+        status = span.get("status", {})
+        is_error = status.get("code", 0) == 2  # STATUS_CODE_ERROR
+
+        if is_error and not is_genai:
+            steps.append(TraceStep(
+                type="error",
+                name=span.get("name", "error"),
+                input={},
+                output={"message": status.get("message", ""), "attributes": attrs},
+                duration_ms=duration_ms,
+                metadata={"span_id": span.get("spanId", ""), "trace_id": trace_id},
+            ))
+        elif is_genai:
+            op_name = attrs.get("gen_ai.operation.name", "")
+            model = attrs.get("gen_ai.request.model", attrs.get("gen_ai.response.model", "unknown"))
+            input_tokens = _safe_int(attrs.get("gen_ai.usage.input_tokens", "0"))
+            output_tokens = _safe_int(attrs.get("gen_ai.usage.output_tokens", "0"))
+
+            tokens = TokenUsage(
+                prompt=input_tokens,
+                completion=output_tokens,
+                total=input_tokens + output_tokens,
+            )
+
+            step = TraceStep(
+                type="llm_call",
+                name=model,
+                input={"operation": op_name} if op_name else {},
+                output={"attributes": {k: v for k, v in attrs.items() if not k.startswith("gen_ai.usage.")}},
+                duration_ms=duration_ms,
+                tokens=tokens,
+                metadata={
+                    "span_id": span.get("spanId", ""),
+                    "trace_id": trace_id,
+                    "provider": attrs.get("gen_ai.provider.name", attrs.get("gen_ai.system", "")),
+                },
+            )
+            steps.append(step)
+
+            if is_error:
+                step.metadata["error"] = status.get("message", "")
+        else:
+            span_name = span.get("name", f"span_{len(steps)}")
+            kind = span.get("kind", 0)
+            # kind 3 = CLIENT, kind 4 = PRODUCER — treat as tool_call if not genai
+            step_type = "tool_call" if kind in (3, 4) else "decision"
+            steps.append(TraceStep(
+                type=step_type,
+                name=span_name,
+                input={"attributes": attrs} if attrs else {},
+                output={},
+                duration_ms=duration_ms,
+                metadata={"span_id": span.get("spanId", ""), "trace_id": trace_id, "kind": kind},
+            ))
+
+    total_tokens = _aggregate_tokens(steps, None)
+
+    final_output = ""
+    for step in reversed(steps):
+        if step.type == "llm_call":
+            final_output = step.output.get("attributes", {}).get("gen_ai.response.model", "")
+            break
+
+    return AgentTrace(
+        trace_id=trace_id,
+        agent_name=agent_name,
+        task=task,
+        steps=steps,
+        final_output=final_output,
+        total_duration_ms=sum(s.duration_ms for s in steps),
+        total_tokens=total_tokens,
+        metadata={
+            "source_format": "otlp",
+            "resource_attributes": resource_attrs,
+        },
+    )
+
+
+def _otlp_attr_value(value: dict) -> str:
+    if "stringValue" in value:
+        return value["stringValue"]
+    if "intValue" in value:
+        return str(value["intValue"])
+    if "doubleValue" in value:
+        return str(value["doubleValue"])
+    if "boolValue" in value:
+        return str(value["boolValue"])
+    if "arrayValue" in value:
+        return json.dumps(value["arrayValue"])
+    if "kvlistValue" in value:
+        return json.dumps(value["kvlistValue"])
+    if "bytesValue" in value:
+        return value["bytesValue"]
+    return ""
+
+
+def _otlp_span_attrs(span: dict) -> dict[str, str]:
+    attrs = {}
+    for attr in span.get("attributes", []):
+        key = attr.get("key", "")
+        if key:
+            attrs[key] = _otlp_attr_value(attr.get("value", {}))
+    return attrs
+
+
+def _safe_int(val: str) -> int:
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 0
+
+
 def ingest_json(source: str | Path | dict) -> AgentTrace:
     """Ingest a trace from a JSON file path, JSON string, or dict."""
     raw = _load_raw(source)
