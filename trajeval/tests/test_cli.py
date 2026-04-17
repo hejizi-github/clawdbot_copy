@@ -700,7 +700,8 @@ class TestCompareCommand:
             "compare", trace, trace, "--details",
         ])
         assert result.exit_code == 0
-        assert "total_ste" in result.output or "failed=0" in result.output
+        assert "Details" in result.output
+        assert "failed=0" in result.output
 
     def test_details_flag_with_json_format_ignored(self):
         trace = str(FIXTURES_DIR / "simple_trace.json")
@@ -1022,6 +1023,7 @@ class TestInputFormat:
         clawdbot_data = json.loads(clawdbot_result.output)
         json_data = json.loads(json_result.output)
         assert clawdbot_data["trace_id"] != json_data["trace_id"]
+        assert len(clawdbot_data["metrics"]) == len(json_data["metrics"])
 
     def test_compare_mixed_formats(self):
         runner = CliRunner()

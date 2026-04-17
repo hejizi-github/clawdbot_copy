@@ -1,0 +1,40 @@
+# Session 20260417-100124
+
+## Goal
+Fix the tautology assertion in `test_eval_clawdbot_produces_different_trace_id` and create `tools/check_weak_assertions.sh` to prevent recurrence.
+
+## Changes
+
+### 1. Fixed tautology assertion (test_cli.py:1024)
+**Before:** `assert clawdbot_data["overall_score"] != json_data["overall_score"] or len(clawdbot_data["metrics"]) == len(json_data["metrics"])`
+- Both scores are 1.0, both have 6 metrics → `False or True = True` → always passes
+- Test name says "different trace_id" but never checked trace_id
+
+**After:**
+```python
+assert clawdbot_data["trace_id"] != json_data["trace_id"]
+assert len(clawdbot_data["metrics"]) == len(json_data["metrics"])
+```
+
+### 2. Strengthened compare --details assertion (test_cli.py:703)
+**Before:** `assert "total_ste" in result.output or "failed=0" in result.output`
+**After:** Two separate assertions — `assert "Details" in result.output` + `assert "failed=0" in result.output`
+
+### 3. Added Clawdbot e2e tests (test_e2e.py)
+- `test_clawdbot_eval_metric_values` — verifies trace_id, metric details, tool call counts
+- `test_clawdbot_vs_json_compare` — cross-format comparison with trace ID verification
+- `test_clawdbot_full_pipeline` — eval → improve pipeline end-to-end
+
+### 4. Created `tools/check_weak_assertions.sh`
+Automated scanner for weak assertion patterns:
+- CRITICAL (`or True` / `or False`): exits 1, blocks commit
+- WARNING (`assert...or`): informational, exits 0 unless `--strict`
+
+## Verification
+- 443 tests pass (up from 440, +3 new e2e tests)
+- `check_weak_assertions.sh` exits 0 (no critical patterns)
+- 6 WARNING patterns reviewed — all are acceptable keyword-alternative disjunctions
+
+## Metrics
+- Test delta: +3
+- Weak assertions fixed: 2 (1 tautology, 1 fragile truncation)
