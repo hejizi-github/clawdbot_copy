@@ -110,7 +110,7 @@ class TestEvalComparePipeline:
             "--format", "markdown",
             "--threshold", "0.3",
         ])
-        assert "##" in result.output or "Metric" in result.output
+        assert "##" in result.output or "Metric" in result.output  # weak-assert-ok: markdown format check
 
     def test_compare_ci_output(self):
         runner = CliRunner()
