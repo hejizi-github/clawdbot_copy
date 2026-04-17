@@ -15,7 +15,7 @@ from .calibration import AnnotationStore, HumanAnnotation, compute_correlation, 
 from .ci_output import format_compare_ci, format_eval_ci, format_judge_ci
 from .compare import compare_reports, format_markdown
 from .improvement import ImprovementReport, Priority, analyze_judge_results, analyze_results
-from .ingester import IngestError, ingest_clawdbot_jsonl, ingest_json
+from .ingester import IngestError, ingest_clawdbot_jsonl, ingest_json, ingest_otlp_json
 from .metrics import MetricConfig, evaluate
 from .scorer import ALL_DIMENSIONS, EnsembleConfig, EnsembleResult, JudgeConfig, JudgeResult, ensemble_judge, judge
 from .storage import DEFAULT_DB_PATH, TrajevalDB
@@ -41,6 +41,8 @@ def _resolve_input_format(trace_file: Path, input_fmt: str) -> str:
 def _load_trace(trace_file: Path, input_format: str):
     if input_format == "clawdbot":
         return ingest_clawdbot_jsonl(trace_file)
+    if input_format == "otlp":
+        return ingest_otlp_json(trace_file)
     return ingest_json(trace_file)
 
 
@@ -49,7 +51,7 @@ def _load_trace(trace_file: Path, input_format: str):
 @click.option("--format", "fmt", type=click.Choice(["table", "json", "ci"]), default="table")
 @click.option(
     "--input-format", "input_fmt",
-    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    type=click.Choice(["auto", "json", "clawdbot", "otlp"]), default="auto",
     help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
 )
 @click.option("--expected-steps", type=int, default=None, help="Baseline step count for efficiency")
@@ -142,7 +144,7 @@ def eval(
 @click.option("--format", "fmt", type=click.Choice(["table", "json", "ci"]), default="table")
 @click.option(
     "--input-format", "input_fmt",
-    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    type=click.Choice(["auto", "json", "clawdbot", "otlp"]), default="auto",
     help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
 )
 @click.option(
@@ -233,7 +235,7 @@ def judge_cmd(
 )
 @click.option(
     "--input-format", "input_fmt",
-    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    type=click.Choice(["auto", "json", "clawdbot", "otlp"]), default="auto",
     help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
 )
 @click.option(
@@ -330,7 +332,7 @@ def compare(
 )
 @click.option(
     "--input-format", "input_fmt",
-    type=click.Choice(["auto", "json", "clawdbot"]), default="auto",
+    type=click.Choice(["auto", "json", "clawdbot", "otlp"]), default="auto",
     help="Trace input format: auto (detect), json (simple), clawdbot (JSONL transcript)",
 )
 @click.option(

@@ -1254,3 +1254,130 @@ class TestHistoryCommand:
         result = runner.invoke(main, ["history", "--db", str(db_path)])
         assert result.exit_code == 0
         assert "No evaluation history" in result.output
+
+
+class TestOtlpInputFormat:
+    """CLI integration tests for --input-format otlp."""
+
+    @staticmethod
+    def _write_otlp_fixture(tmp_path):
+        data = {
+            "resourceSpans": [{
+                "resource": {"attributes": [
+                    {"key": "service.name", "value": {"stringValue": "test-agent"}}
+                ]},
+                "scopeSpans": [{
+                    "scope": {"name": "test"},
+                    "spans": [
+                        {
+                            "traceId": "otlp-trace-001",
+                            "spanId": "s1",
+                            "parentSpanId": "",
+                            "name": "chat claude-sonnet-4-6",
+                            "kind": 3,
+                            "startTimeUnixNano": "1000000000000",
+                            "endTimeUnixNano": "1000500000000",
+                            "attributes": [
+                                {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
+                                {"key": "gen_ai.request.model", "value": {"stringValue": "claude-sonnet-4-6"}},
+                                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "200"}},
+                                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "80"}},
+                            ],
+                            "status": {"code": 0},
+                        },
+                        {
+                            "traceId": "otlp-trace-001",
+                            "spanId": "s2",
+                            "parentSpanId": "s1",
+                            "name": "execute_tool bash",
+                            "kind": 1,
+                            "startTimeUnixNano": "1000500000000",
+                            "endTimeUnixNano": "1000600000000",
+                            "attributes": [
+                                {"key": "gen_ai.operation.name", "value": {"stringValue": "execute_tool"}},
+                                {"key": "gen_ai.tool.name", "value": {"stringValue": "bash"}},
+                            ],
+                            "status": {"code": 0},
+                        },
+                    ],
+                }],
+            }],
+        }
+        path = tmp_path / "otlp_trace.json"
+        path.write_text(json.dumps(data))
+        return path
+
+    def test_eval_otlp_format(self, tmp_path):
+        path = self._write_otlp_fixture(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(path),
+            "--input-format", "otlp",
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["trace_id"] == "otlp-trace-001"
+        assert data["passed"] is True
+        assert len(data["metrics"]) > 0
+
+    def test_compare_otlp_format(self, tmp_path):
+        path = self._write_otlp_fixture(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(path), str(path),
+            "--input-format", "otlp",
+            "--format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["has_regression"] is False
+
+    def test_annotate_otlp_format(self, tmp_path):
+        path = self._write_otlp_fixture(tmp_path)
+        out = tmp_path / "ann.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(path),
+            "--input-format", "otlp",
+            "--output", str(out),
+            "--dimensions", "task_completion",
+        ], input="4\n")
+        assert result.exit_code == 0
+        assert "Saved 1 annotation" in result.output
+
+    @patch("trajeval.cli.judge")
+    def test_judge_otlp_format(self, mock_judge, tmp_path):
+        mock_judge.return_value = JudgeResult(
+            trace_id="otlp-trace-001",
+            dimensions=[JudgeDimension(name="task_completion", score=4, explanation="good")],
+            overall_score=0.8,
+            model="test-model",
+        )
+        path = self._write_otlp_fixture(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(path),
+            "--input-format", "otlp",
+            "--threshold", "0.7",
+        ])
+        assert result.exit_code == 0
+        assert mock_judge.call_count == 1
+
+    def test_eval_otlp_different_trace_id_from_json(self, tmp_path):
+        otlp_path = self._write_otlp_fixture(tmp_path)
+        runner = CliRunner()
+        otlp_result = runner.invoke(main, [
+            "eval", str(otlp_path),
+            "--input-format", "otlp",
+            "--format", "json", "--threshold", "0.1",
+        ])
+        json_result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert otlp_result.exit_code == 0
+        assert json_result.exit_code == 0
+        otlp_data = json.loads(otlp_result.output)
+        json_data = json.loads(json_result.output)
+        assert otlp_data["trace_id"] != json_data["trace_id"]
