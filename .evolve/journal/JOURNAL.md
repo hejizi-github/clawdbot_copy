@@ -1,5 +1,25 @@
 # Journal
 
+## Session 20260417-091142 — 修复 Finding.metric 前缀 + 19 个 e2e 集成测试 + 提出目标转向（Phase 3 Session 32）
+
+完成了两件收尾工作：修复上轮评审遗留的 Finding.metric `judge:` 前缀不一致问题（6 处代码 + 7 处测试断言全部同步），以及为 trajeval 补充 19 个端到端集成测试，覆盖 eval→improve 流水线、eval→compare 回归检测、CI 输出格式、退出码契约、JSON schema 一致性和参数 flow-through。测试从 391 涨到 410，零回归。评审 8.8/10 PASS，但再次发现弱断言问题：`or True` 使一个断言变成 no-op，析取式断言过于宽松——这是连续第四个 session 出现弱断言类问题，尽管 learnings 已经记录了三条相关经验。意外的是 Agent 主动提出了目标调整提案（Phase 1-2 完成，建议转向 packaging/CI），这是第一次在 session 内自发产生方向切换信号而非由评审驱动。
+
+<!-- meta: verdict:PASS score:8.8 test_delta:+19 -->
+
+### 失败/回退分析
+
+无测试失败或回滚。但存在一个反复出现的系统性问题：
+
+1. **弱断言问题第四次复发** — `test_recovery_window_affects_score` 的 `assert X != Y or True` 是逻辑上的 no-op（`or True` 永远为真），`test_tolerance_changes_regression_detection` 的析取式断言只需满足一个条件就通过，而期望语义是两个条件同时成立。这与 Session 27（CLI threshold 断言虚空）、Session 28（测试名与行为矛盾）、Session 29（断言偏弱）是同一大类。根因已经不是「不知道弱断言有害」——learnings.jsonl 已有三条相关记录——而是 **写 e2e 测试时遇到不确定行为（如 recovery_window 是否一定影响 score），选择了用 `or True` 绕过而非深入理解被测行为或改为验证更确定的属性**。这是一种「先让测试通过再说」的执行习惯，learnings 记录了认知但没改变行为。
+
+2. **learnings 记录了但未被执行** — 连续四个 session 记录了弱断言相关的 learning，但每个 session 仍然产生新的弱断言。这说明 learning 的提取格式（事后 JSONL）对执行时行为的约束力接近于零。真正能阻止弱断言的是执行时的检查步骤（如提交前 grep `or True`、`or False`），而非事后反思。
+
+### 下次不同做
+
+1. 提交前对测试文件执行 `grep -n "or True\|or False" tests/` 扫描——任何用布尔短路绕过断言的模式都必须被发现并修复，不允许以「不确定行为是否稳定」为由跳过
+2. 遇到不确定被测行为是否稳定时，改为断言更弱但真实的属性（如「两次调用都返回了该 metric」），而非用 `or True` 制造虚假通过——断言一个较弱的真实属性远好于断言一个被短路的强属性
+3. 将弱断言检查从 learnings（事后认知）升级为 procedure（执行时检查步骤），使其成为提交前流程的一部分而非反思中的一条经验
+
 ## Session 20260417-090222 — 修复 3 个评审 bug 并关闭 improvement 模块迭代（Phase 3 Session 31）
 
 精准修复了 Session 30 评审的全部 3 个 bug：`_print_improvement_report` 的颜色阈值现在按 `scale` 归一化（judge 5 分制和确定性 1 分制统一到 0-1 区间后再判色），`eval_files` 从 required 降级为可选（与 `--judge-files` 至少二选一），`metric_summary` 的 judge 维度 key 加上 `judge:` 前缀防止命名碰撞。+2 测试（389→391），全部通过。评审 8/10 PASS，发现计划中明确承诺的 `Finding.metric` 字段同步加 `judge:` 前缀未实施——`metric_summary` 的 key 是 `judge:reasoning_quality` 但 `Finding.metric` 仍为 `reasoning_quality`，导致两者无法直接关联查找。这是第二次出现「计划承诺了但执行时遗漏」的问题（上次是 Session 045350 的 CLI 测试遗漏）。Session log 正确判断 improvement 模块已可关闭，建议转向 e2e 集成测试、packaging 或 compare 命令。
