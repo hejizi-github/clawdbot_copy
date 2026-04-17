@@ -3,22 +3,27 @@
 **Verdict**: PASS
 
 **各维度评分**:
-- 方向正确性 (30%): 8/10 — 修复弱断言和添加 CI 都是项目成熟度的正确投资，但属于基础设施工作而非核心功能推进
-- 完成度 (25%): 9/10 — 两个弱断言修复彻底（grep 验证无残留），CI 三阶段流水线完整，ruff 全量清理干净
-- 准确性 (20%): 9/10 — recovery_window 的 flow-through 断言经验证确实对应 metrics.py:372 的实际输出；CI YAML 语法合法；410 tests 全部通过
-- 一致性 (15%): 9/10 — 与 project-proposal.md 中 trajeval 的定位一致，CI 工作流与 pyproject.toml 的 dev 依赖配置协调
-- 副作用 (10%): 8/10 — ruff line-length 从 100→120 且对 tests/ 和 improvement.py 豁免 E501，是合理的务实选择；变量重命名 l→ln/lp 纯机械替换无风险
+- 方向正确性 (30%): 9/10 — 直接实现 project-proposal.md Section 6 中描述的 Clawdbot JSONL ingestion，有效连接 Phase 1 学习和 Phase 3 构建
+- 完成度 (25%): 9/10 — ingester 函数、CLI 四命令集成、16 个测试覆盖正常路径和边界情况，验证标准全部达成（426 tests, 0 ruff violations）
+- 准确性 (20%): 8/10 — 代码逻辑正确经测试验证；计划中称"Section 7"但实际是 Section 6；session log 称"7 个 CLI 命令"实际为 6 个（eval/judge/compare/annotate/calibrate/improve）
+- 一致性 (15%): 9/10 — 与 project-proposal.md 的架构设计完全一致（Ingestion Layer 支持 JSONL replay），目标调整提案合理
+- 副作用 (10%): 9/10 — 改动完全增量式，auto 默认值保持后向兼容，426 个测试全部通过无回归
 
-**加权总分**: 8.6/10
+**加权总分**: 8.8/10
 
 **做得好的地方**:
-- 弱断言修复策略准确：`test_tolerance_changes_regression_detection` 拆析取式为独立断言是正解；`test_recovery_window_affects_score` 没有强行断言 score 差异（实际相同），而是转为验证参数 flow-through，体现了对被测代码行为的正确理解
-- CI 设计合理：lint→test→build 的依赖链、paths 过滤避免无关触发、矩阵覆盖三个 Python 版本、artifact 上传，都是实用的选择
-- 在修复断言前先补了 `assert short_recovery is not None` 的前置检查，带有清晰的错误信息
+- 映射设计清晰：Clawdbot 的 assistant/toolResult/bashExecution 角色到 TraceStep 类型的映射逻辑合理，toolResult 合并到对应 tool_call 的设计尤为巧妙
+- 测试覆盖全面：16 个新测试涵盖基本解析、工具调用合并、bash 执行、token 聚合、时长计算、复杂会话、边界情况（空文件、无 header、孤立 toolResult、字符串内容）
+- CLI 集成一致：`--input-format auto|json|clawdbot` 统一添加到 eval/judge/compare/annotate 四个命令，auto 检测基于文件扩展名简洁实用
+- `_resolve_input_format` 和 `_load_trace` 抽取得当，compare 命令可以混合比较不同格式的 trace 文件
 
 **需要改进的地方**:
-- CI 的 test job 中 `pytest tests/ --tb=short -q --co -q 2>&1 | tail -1`（Count tests 步骤）在 CI 环境中价值有限——它只是打印测试数量但不影响 pass/fail，考虑移除或改为更有意义的输出
-- `ruff check` 在 lint job 中直接 `pip install ruff` 没有锁定版本，未来 ruff 升级可能导致 CI 意外失败；建议 pin 版本或从 `.[dev]` 安装
+- 计划文档小错误：plan 中写的是"project-proposal.md Section 7"，但实际 Clawdbot 集成在 Section 6（"Connection to Clawdbot"）。session log 称有 7 个 CLI 命令，实际为 6 个。这些不影响代码但影响文档准确性
+- `ingester.py:55` 变量 `text` 与外层同名变量（line 22）有 shadowing，虽不影响正确性但可读性略降，建议内层改名为 `user_text` 或类似
+- `improve` 命令未添加 `--input-format` 选项（它读取的是 eval 结果 JSON 而非 trace 文件，所以不需要——但值得在下次整理时确认这个设计决策是否明确）
+- 没有用真实 Clawdbot JSONL 文件做端到端测试（plan 中提到 "Manual: create a sample Clawdbot JSONL fixture and verify round-trip" 但未见执行）
 
 **下次 session 的建议**:
-- 基础设施已到位，建议回到核心功能推进。可以考虑：(1) 增加 LLM judge 的 mock 测试覆盖 scorer.py 的核心路径，(2) 实现 project-proposal.md 中提到的还未开发的功能模块，(3) 推动 CI 首次在 GitHub 上实际运行并验证
+- 用一个真实的 Clawdbot session JSONL 文件做端到端 smoke test，验证 ingester 在生产数据上的表现
+- 考虑添加 `--input-format` 的 CLI 测试（目前只有 ingester 单元测试，无 CLI 集成测试覆盖新选项）
+- 目标调整提案合理，建议在下次 session 获批后聚焦新目标中的某一项（OTLP 支持或 PyPI packaging）
