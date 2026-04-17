@@ -346,6 +346,27 @@ class TestFormatJudgeCI:
         assert "## trajeval Judge Summary" in output
         assert "❌ FAIL**" in output
 
+    def test_passed_auto_compute_pass(self):
+        result = self._make_result([
+            JudgeDimension(name="m1", score=4, explanation="ok"),
+        ], overall=0.8)
+        output = format_judge_ci(result, threshold=0.7)
+        assert "✅ PASS**" in output
+
+    def test_passed_auto_compute_fail(self):
+        result = self._make_result([
+            JudgeDimension(name="m1", score=2, explanation="bad"),
+        ], overall=0.4)
+        output = format_judge_ci(result, threshold=0.7)
+        assert "❌ FAIL**" in output
+
+    def test_passed_explicit_overrides_auto(self):
+        result = self._make_result([
+            JudgeDimension(name="m1", score=4, explanation="ok"),
+        ], overall=0.8)
+        output = format_judge_ci(result, threshold=0.7, passed=False)
+        assert "❌ FAIL**" in output
+
 
 class TestCLIJudgeCIFormat:
     def test_judge_ci_format_pass(self):

@@ -153,13 +153,80 @@ class TestLoopDetection:
         result = loop_detection(trace)
         assert result.score < 1.0
         patterns = [entry["pattern"] for entry in result.details["loops_found"]]
-        bigrams = [p for p in patterns if len(p) == 2]
-        assert any("search_files" in bg for bg in bigrams)
+        assert any("search_files" in p for p in patterns)
 
     def test_empty_trace(self):
         trace = AgentTrace(trace_id="e1")
         result = loop_detection(trace)
         assert result.score == 1.0
+
+    def test_dedup_removes_subsumed_bigrams(self):
+        """2-grams subsumed by detected 3-grams should be removed."""
+        trace = AgentTrace(
+            trace_id="dedup1",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="C"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[2, 3])
+        patterns = result.details["loops_found"]
+        lengths = {p["length"] for p in patterns}
+        assert 3 in lengths
+        assert 2 not in lengths
+
+    def test_dedup_keeps_independent_bigrams(self):
+        """2-grams NOT subsumed by any 3-gram should be kept."""
+        trace = AgentTrace(
+            trace_id="dedup2",
+            steps=[
+                TraceStep(type="llm_call", name="X"),
+                TraceStep(type="tool_call", name="Y"),
+                TraceStep(type="llm_call", name="X"),
+                TraceStep(type="tool_call", name="Y"),
+                TraceStep(type="llm_call", name="Z"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[2, 3])
+        patterns = result.details["loops_found"]
+        assert len(patterns) >= 1
+        assert any(p["pattern"] == ["X", "Y"] for p in patterns)
+
+    def test_dedup_reduces_penalty(self):
+        """Dedup should produce a higher (less penalized) score than naive counting."""
+        trace = AgentTrace(
+            trace_id="dedup3",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[2, 3])
+        assert result.score > 0.1
+        assert result.details["total_repeated_steps"] < len(trace.steps)
+
+    def test_single_ngram_size_no_dedup_needed(self):
+        """With a single n-gram size, no dedup occurs — just normal counting."""
+        trace = AgentTrace(
+            trace_id="dedup4",
+            steps=[
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+                TraceStep(type="llm_call", name="A"),
+                TraceStep(type="tool_call", name="B"),
+            ],
+        )
+        result = loop_detection(trace, ngram_sizes=[2])
+        patterns = result.details["loops_found"]
+        assert any(p["pattern"] == ["A", "B"] for p in patterns)
 
 
 class TestTokenEfficiency:

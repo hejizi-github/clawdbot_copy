@@ -119,6 +119,33 @@ def _output_indicates_error(output: dict) -> bool:
     return False
 
 
+def _is_subpattern(short: tuple, long: tuple) -> bool:
+    """Check if short pattern is a contiguous subsequence of long pattern repeated."""
+    ls, ll = len(short), len(long)
+    if ls >= ll:
+        return False
+    for i in range(ll - ls + 1):
+        if long[i : i + ls] == short:
+            return True
+    return False
+
+
+def _deduplicate_loops(loops: list[dict]) -> list[dict]:
+    """Remove shorter patterns that are subsequences of longer detected patterns."""
+    sorted_loops = sorted(loops, key=lambda x: x["length"], reverse=True)
+    kept: list[dict] = []
+    for loop in sorted_loops:
+        pattern = tuple(loop["pattern"])
+        subsumed = False
+        for longer in kept:
+            if _is_subpattern(pattern, tuple(longer["pattern"])):
+                subsumed = True
+                break
+        if not subsumed:
+            kept.append(loop)
+    return kept
+
+
 def loop_detection(
     trace: AgentTrace,
     ngram_sizes: list[int] | None = None,
@@ -137,8 +164,7 @@ def loop_detection(
             details={"step_count": len(names), "loops_found": []},
         )
 
-    loops_found: list[dict] = []
-    total_repeated_steps = 0
+    raw_loops: list[dict] = []
 
     for n in ngram_sizes:
         if len(names) < n:
@@ -147,12 +173,27 @@ def loop_detection(
         counts = Counter(ngrams)
         for gram, count in counts.items():
             if count >= min_repeats:
-                loops_found.append({
+                positions = [
+                    i for i in range(len(names) - n + 1)
+                    if tuple(names[i : i + n]) == gram
+                ]
+                raw_loops.append({
                     "pattern": list(gram),
                     "length": n,
                     "occurrences": count,
+                    "_positions": positions,
                 })
-                total_repeated_steps += n * (count - 1)
+
+    loops_found = _deduplicate_loops(raw_loops)
+
+    repeated_positions: set[int] = set()
+    for loop in loops_found:
+        positions = loop.pop("_positions", [])
+        for pos in positions[1:]:
+            for offset in range(loop["length"]):
+                repeated_positions.add(pos + offset)
+
+    total_repeated_steps = len(repeated_positions)
 
     if not loops_found:
         score = 1.0

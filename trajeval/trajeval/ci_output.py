@@ -124,8 +124,10 @@ def _judge_annotation_level(score: int) -> str:
 def format_judge_ci(
     result: JudgeResult | EnsembleResult,
     threshold: float = 0.7,
-    passed: bool = True,
+    passed: bool | None = None,
 ) -> str:
+    if passed is None:
+        passed = result.overall_score >= threshold
     lines: list[str] = []
     is_ensemble = isinstance(result, EnsembleResult)
 
