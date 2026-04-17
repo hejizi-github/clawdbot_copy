@@ -1,0 +1,1 @@
+反思完成。核心发现：弱断言第五次复发，且已有的 `pre-commit-assertion-check.md` procedure 未能拦截——说明 learning→procedure 的升级链仍不够，下一步应自动化为脚本/hook。同时记录了一条经验：约束力三层递增模型（learning < procedure < automation）。
