@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from trajeval.ingester import IngestError, ingest_clawdbot_jsonl, ingest_json, ingest_otlp
+from trajeval.ingester import IngestError, ingest_clawdbot_jsonl, ingest_json, ingest_otlp_json
 
 
 class TestIngestFromFile:
@@ -469,297 +469,411 @@ class TestClawdbotComplexSession:
         assert len(trace.tool_calls) == 0
 
 
-# --- OTLP ingestion tests ---
+# --- OTLP JSON Ingestion Tests ---
 
 
 def _make_otlp_span(
-    trace_id="AAAA1234BBBB5678CCCC9012DDDDEE00",
-    span_id="1111111111111111",
+    name="chat claude-sonnet-4-6",
+    trace_id="abc123",
+    span_id="span-001",
     parent_span_id="",
-    name="chat gpt-4o",
-    start_ns=1700000000000000000,
-    end_ns=1700000002000000000,
     kind=3,
+    start_ns="1713340800000000000",
+    end_ns="1713340801000000000",
     attributes=None,
-    status=None,
+    status_code=0,
+    status_message="",
 ):
     span = {
         "traceId": trace_id,
         "spanId": span_id,
         "parentSpanId": parent_span_id,
         "name": name,
-        "startTimeUnixNano": str(start_ns),
-        "endTimeUnixNano": str(end_ns),
         "kind": kind,
+        "startTimeUnixNano": start_ns,
+        "endTimeUnixNano": end_ns,
         "attributes": attributes or [],
-        "status": status or {},
+        "status": {"code": status_code},
     }
+    if status_message:
+        span["status"]["message"] = status_message
     return span
 
 
-def _make_otlp_trace(spans, service_name="test-agent"):
+def _otlp_attr(key, string_val=None, int_val=None, double_val=None, bool_val=None):
+    attr = {"key": key, "value": {}}
+    if string_val is not None:
+        attr["value"]["stringValue"] = string_val
+    elif int_val is not None:
+        attr["value"]["intValue"] = str(int_val)
+    elif double_val is not None:
+        attr["value"]["doubleValue"] = double_val
+    elif bool_val is not None:
+        attr["value"]["boolValue"] = bool_val
+    return attr
+
+
+def _make_otlp_export(spans, service_name="my-agent"):
+    resource_attrs = [_otlp_attr("service.name", string_val=service_name)]
     return {
-        "resourceSpans": [{
-            "resource": {
-                "attributes": [
-                    {"key": "service.name", "value": {"stringValue": service_name}},
+        "resourceSpans": [
+            {
+                "resource": {"attributes": resource_attrs},
+                "scopeSpans": [
+                    {
+                        "scope": {"name": "opentelemetry.instrumentation.anthropic"},
+                        "spans": spans,
+                    }
                 ],
-            },
-            "scopeSpans": [{
-                "scope": {"name": "test.scope"},
-                "spans": spans,
-            }],
-        }],
+            }
+        ]
     }
 
 
-def _genai_attrs(model="gpt-4o", provider="openai", op="chat",
-                 input_tokens=100, output_tokens=50):
-    attrs = [
-        {"key": "gen_ai.operation.name", "value": {"stringValue": op}},
-        {"key": "gen_ai.request.model", "value": {"stringValue": model}},
-        {"key": "gen_ai.provider.name", "value": {"stringValue": provider}},
-        {"key": "gen_ai.usage.input_tokens", "value": {"intValue": str(input_tokens)}},
-        {"key": "gen_ai.usage.output_tokens", "value": {"intValue": str(output_tokens)}},
-    ]
-    return attrs
+def _write_otlp_json(path, data):
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
 
 class TestOtlpBasic:
-    def test_fixture_file(self, otlp_trace_path):
-        """Loads the standard OTLP fixture file."""
-        trace = ingest_otlp(otlp_trace_path)
-        assert trace.trace_id == "AAAA1234BBBB5678CCCC9012DDDDEE00"
-        assert trace.agent_name == "my-agent"
-        assert trace.metadata["source_format"] == "otlp"
-        assert trace.metadata["resource_attributes"]["service.name"] == "my-agent"
+    def test_simple_chat_span(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                name="chat claude-sonnet-4-6",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.request.model", string_val="claude-sonnet-4-6"),
+                    _otlp_attr("gen_ai.provider.name", string_val="anthropic"),
+                    _otlp_attr("gen_ai.usage.input_tokens", int_val=100),
+                    _otlp_attr("gen_ai.usage.output_tokens", int_val=50),
+                ],
+            )
+        ]
+        path = _write_otlp_json(tmp_path / "chat.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
 
-    def test_fixture_step_count(self, otlp_trace_path):
-        trace = ingest_otlp(otlp_trace_path)
+        assert trace.trace_id == "abc123"
+        assert trace.agent_name == "my-agent"
+        assert trace.step_count == 1
+        assert len(trace.llm_calls) == 1
+        assert trace.llm_calls[0].name == "claude-sonnet-4-6"
+        assert trace.llm_calls[0].type == "llm_call"
+        assert trace.llm_calls[0].tokens.prompt == 100
+        assert trace.llm_calls[0].tokens.completion == 50
+        assert trace.llm_calls[0].tokens.total == 150
+        assert trace.metadata["source_format"] == "otlp_json"
+
+    def test_duration_computed_from_timestamps(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                start_ns="1000000000000",
+                end_ns="1000500000000",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.request.model", string_val="gpt-4"),
+                ],
+            )
+        ]
+        path = _write_otlp_json(tmp_path / "dur.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.steps[0].duration_ms == 500.0
+
+    def test_service_name_as_agent(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                ],
+            )
+        ]
+        path = _write_otlp_json(tmp_path / "svc.json", _make_otlp_export(spans, service_name="code-assistant"))
+        trace = ingest_otlp_json(path)
+
+        assert trace.agent_name == "code-assistant"
+
+    def test_agent_name_from_span_attribute(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.agent.name", string_val="my-cool-agent"),
+                ],
+            )
+        ]
+        export = _make_otlp_export(spans)
+        export["resourceSpans"][0]["resource"]["attributes"] = []
+        path = _write_otlp_json(tmp_path / "agent.json", export)
+        trace = ingest_otlp_json(path)
+
+        assert trace.agent_name == "my-cool-agent"
+
+
+class TestOtlpToolCalls:
+    def test_execute_tool_span(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                name="execute_tool search_web",
+                kind=1,
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="execute_tool"),
+                    _otlp_attr("gen_ai.tool.name", string_val="search_web"),
+                    _otlp_attr("gen_ai.tool.call.id", string_val="call-123"),
+                    _otlp_attr("gen_ai.tool.call.arguments", string_val='{"query": "test"}'),
+                    _otlp_attr("gen_ai.tool.call.result", string_val="Search results..."),
+                ],
+            )
+        ]
+        path = _write_otlp_json(tmp_path / "tool.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.step_count == 1
+        assert len(trace.tool_calls) == 1
+        tool = trace.tool_calls[0]
+        assert tool.name == "search_web"
+        assert tool.type == "tool_call"
+        assert tool.input["arguments"] == '{"query": "test"}'
+        assert tool.output["text"] == "Search results..."
+        assert tool.metadata["tool_call_id"] == "call-123"
+
+    def test_tool_name_from_span_name(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                name="execute_tool file_read",
+                kind=1,
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="execute_tool"),
+                ],
+            )
+        ]
+        path = _write_otlp_json(tmp_path / "tool2.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.tool_calls[0].name == "file_read"
+
+
+class TestOtlpErrors:
+    def test_error_status_span(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                name="chat claude-sonnet-4-6",
+                status_code=2,
+                status_message="Rate limit exceeded",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("error.type", string_val="RateLimitError"),
+                ],
+            )
+        ]
+        path = _write_otlp_json(tmp_path / "error.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.step_count == 1
+        assert len(trace.errors) == 1
+        assert trace.errors[0].name == "RateLimitError"
+        assert trace.errors[0].output["error"] == "Rate limit exceeded"
+
+    def test_file_not_found(self):
+        with pytest.raises(IngestError, match="File not found"):
+            ingest_otlp_json("/nonexistent/path.json")
+
+    def test_invalid_json(self, tmp_path):
+        path = tmp_path / "bad.json"
+        path.write_text("{not json}", encoding="utf-8")
+        with pytest.raises(IngestError, match="Invalid JSON"):
+            ingest_otlp_json(path)
+
+    def test_no_resource_spans(self, tmp_path):
+        path = _write_otlp_json(tmp_path / "empty.json", {"resourceSpans": []})
+        with pytest.raises(IngestError, match="No resourceSpans"):
+            ingest_otlp_json(path)
+
+
+class TestOtlpComplexTrace:
+    def test_multi_span_agent_session(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                name="chat claude-sonnet-4-6",
+                span_id="s1",
+                start_ns="1000000000000",
+                end_ns="1000500000000",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.request.model", string_val="claude-sonnet-4-6"),
+                    _otlp_attr("gen_ai.usage.input_tokens", int_val=200),
+                    _otlp_attr("gen_ai.usage.output_tokens", int_val=80),
+                ],
+            ),
+            _make_otlp_span(
+                name="execute_tool bash",
+                span_id="s2",
+                parent_span_id="s1",
+                kind=1,
+                start_ns="1000500000000",
+                end_ns="1000600000000",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="execute_tool"),
+                    _otlp_attr("gen_ai.tool.name", string_val="bash"),
+                    _otlp_attr("gen_ai.tool.call.arguments", string_val="ls -la"),
+                    _otlp_attr("gen_ai.tool.call.result", string_val="total 42\nfile1.py"),
+                ],
+            ),
+            _make_otlp_span(
+                name="chat claude-sonnet-4-6",
+                span_id="s3",
+                start_ns="1000600000000",
+                end_ns="1000900000000",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.request.model", string_val="claude-sonnet-4-6"),
+                    _otlp_attr("gen_ai.usage.input_tokens", int_val=350),
+                    _otlp_attr("gen_ai.usage.output_tokens", int_val=120),
+                    _otlp_attr("gen_ai.output.messages", string_val="I found 1 file."),
+                ],
+            ),
+        ]
+        path = _write_otlp_json(tmp_path / "multi.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
         assert trace.step_count == 3
         assert len(trace.llm_calls) == 2
         assert len(trace.tool_calls) == 1
 
-    def test_fixture_token_aggregation(self, otlp_trace_path):
-        trace = ingest_otlp(otlp_trace_path)
-        assert trace.total_tokens.prompt == 1300  # 500 + 800
-        assert trace.total_tokens.completion == 320  # 120 + 200
-        assert trace.total_tokens.total == 1620
+        assert trace.llm_calls[0].tokens.prompt == 200
+        assert trace.tool_calls[0].name == "bash"
+        assert trace.tool_calls[0].output["text"] == "total 42\nfile1.py"
+        assert trace.llm_calls[1].tokens.prompt == 350
 
-    def test_fixture_duration(self, otlp_trace_path):
-        trace = ingest_otlp(otlp_trace_path)
-        llm_calls = trace.llm_calls
-        assert llm_calls[0].duration_ms == 2000.0  # 2 seconds
-        assert llm_calls[1].duration_ms == 2000.0  # 2 seconds
+        assert trace.total_tokens.prompt == 550
+        assert trace.total_tokens.completion == 200
+        assert trace.total_tokens.total == 750
 
-    def test_dict_input(self):
-        spans = [_make_otlp_span(attributes=_genai_attrs())]
-        data = _make_otlp_trace(spans)
-        trace = ingest_otlp(data)
-        assert trace.step_count == 1
-        assert trace.agent_name == "test-agent"
+        assert trace.total_duration_ms == 900.0
 
-    def test_string_input(self):
-        spans = [_make_otlp_span(attributes=_genai_attrs())]
-        data = _make_otlp_trace(spans)
-        trace = ingest_otlp(json.dumps(data))
-        assert trace.step_count == 1
+        assert trace.final_output == "I found 1 file."
 
-    def test_file_input(self, tmp_path):
-        spans = [_make_otlp_span(attributes=_genai_attrs())]
-        data = _make_otlp_trace(spans)
-        path = tmp_path / "trace.json"
-        path.write_text(json.dumps(data))
-        trace = ingest_otlp(path)
-        assert trace.step_count == 1
-
-
-class TestOtlpGenAI:
-    def test_model_extraction(self):
-        attrs = _genai_attrs(model="claude-sonnet-4-6", provider="anthropic")
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert trace.llm_calls[0].name == "claude-sonnet-4-6"
-        assert trace.llm_calls[0].metadata["provider"] == "anthropic"
-
-    def test_token_usage(self):
-        attrs = _genai_attrs(input_tokens=1000, output_tokens=500)
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert trace.llm_calls[0].tokens.prompt == 1000
-        assert trace.llm_calls[0].tokens.completion == 500
-        assert trace.llm_calls[0].tokens.total == 1500
-
-    def test_operation_name_in_input(self):
-        attrs = _genai_attrs(op="text_completion")
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert trace.llm_calls[0].input["operation"] == "text_completion"
-
-    def test_multiple_llm_spans(self):
-        s1 = _make_otlp_span(
-            span_id="AAA", start_ns=1000000000, end_ns=2000000000,
-            attributes=_genai_attrs(model="gpt-4o", input_tokens=100, output_tokens=50),
-        )
-        s2 = _make_otlp_span(
-            span_id="BBB", start_ns=3000000000, end_ns=4000000000,
-            attributes=_genai_attrs(model="gpt-4o-mini", input_tokens=200, output_tokens=80),
-        )
-        trace = ingest_otlp(_make_otlp_trace([s1, s2]))
-        assert len(trace.llm_calls) == 2
-        assert trace.llm_calls[0].name == "gpt-4o"
-        assert trace.llm_calls[1].name == "gpt-4o-mini"
-        assert trace.total_tokens.prompt == 300
-        assert trace.total_tokens.completion == 130
-
-    def test_response_model_fallback(self):
-        attrs = [
-            {"key": "gen_ai.response.model", "value": {"stringValue": "gpt-4o-2024-08-06"}},
-            {"key": "gen_ai.provider.name", "value": {"stringValue": "openai"}},
-        ]
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert trace.llm_calls[0].name == "gpt-4o-2024-08-06"
-
-
-class TestOtlpToolCalls:
-    def test_non_genai_client_span_is_tool_call(self):
-        tool_attrs = [
-            {"key": "tool.name", "value": {"stringValue": "search"}},
-        ]
-        spans = [_make_otlp_span(name="search", kind=3, attributes=tool_attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert len(trace.tool_calls) == 1
-        assert trace.tool_calls[0].name == "search"
-
-    def test_internal_span_is_decision(self):
-        spans = [_make_otlp_span(name="planning", kind=1, attributes=[])]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert trace.steps[0].type == "decision"
-        assert trace.steps[0].name == "planning"
-
-
-class TestOtlpErrors:
-    def test_error_span(self):
-        spans = [_make_otlp_span(
-            name="failed_tool",
-            kind=3,
-            attributes=[],
-            status={"code": 2, "message": "Connection timeout"},
-        )]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert len(trace.errors) == 1
-        assert trace.errors[0].output["message"] == "Connection timeout"
-
-    def test_genai_span_with_error_status(self):
-        """GenAI span with error status is still classified as llm_call, with error in metadata."""
-        attrs = _genai_attrs()
-        spans = [_make_otlp_span(
-            attributes=attrs,
-            status={"code": 2, "message": "Rate limit exceeded"},
-        )]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert len(trace.llm_calls) == 1
-        assert trace.llm_calls[0].metadata["error"] == "Rate limit exceeded"
-
-    def test_empty_resource_spans(self):
-        with pytest.raises(IngestError, match="No resourceSpans"):
-            ingest_otlp({"resourceSpans": []})
-
-    def test_no_spans(self):
-        data = {
-            "resourceSpans": [{
-                "resource": {"attributes": []},
-                "scopeSpans": [{"scope": {"name": "x"}, "spans": []}],
-            }],
-        }
-        with pytest.raises(IngestError, match="No spans"):
-            ingest_otlp(data)
-
-    def test_invalid_json_file(self, tmp_path):
-        path = tmp_path / "bad.json"
-        path.write_text("{bad json")
-        with pytest.raises(IngestError, match="Invalid JSON"):
-            ingest_otlp(path)
-
-    def test_nonexistent_file(self):
-        with pytest.raises(IngestError, match="File not found"):
-            ingest_otlp("/nonexistent/otlp.json")
-
-
-class TestOtlpAttributeTypes:
-    def test_string_value(self):
-        attrs = [{"key": "gen_ai.request.model", "value": {"stringValue": "test-model"}}]
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert trace.llm_calls[0].name == "test-model"
-
-    def test_int_value(self):
-        attrs = _genai_attrs(input_tokens=999, output_tokens=1)
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        assert trace.llm_calls[0].tokens.prompt == 999
-
-    def test_double_value(self):
-        attrs = [
-            {"key": "gen_ai.request.model", "value": {"stringValue": "m"}},
-            {"key": "custom.score", "value": {"doubleValue": 0.95}},
-        ]
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        step_attrs = trace.steps[0].output.get("attributes", {})
-        assert step_attrs["custom.score"] == "0.95"
-
-    def test_bool_value(self):
-        attrs = [
-            {"key": "gen_ai.request.model", "value": {"stringValue": "m"}},
-            {"key": "gen_ai.stream", "value": {"boolValue": True}},
-        ]
-        spans = [_make_otlp_span(attributes=attrs)]
-        trace = ingest_otlp(_make_otlp_trace(spans))
-        step_attrs = trace.steps[0].output.get("attributes", {})
-        assert step_attrs["gen_ai.stream"] == "True"
-
-
-class TestOtlpOrdering:
-    def test_spans_ordered_by_start_time(self):
-        s1 = _make_otlp_span(
-            span_id="LATE", start_ns=5000000000, end_ns=6000000000,
-            attributes=_genai_attrs(model="second"),
-        )
-        s2 = _make_otlp_span(
-            span_id="EARLY", start_ns=1000000000, end_ns=2000000000,
-            attributes=_genai_attrs(model="first"),
-        )
-        trace = ingest_otlp(_make_otlp_trace([s1, s2]))
-        assert trace.steps[0].name == "first"
-        assert trace.steps[1].name == "second"
-
-    def test_multiple_scope_spans(self):
-        data = {
-            "resourceSpans": [{
-                "resource": {"attributes": [
-                    {"key": "service.name", "value": {"stringValue": "multi-scope"}},
-                ]},
-                "scopeSpans": [
-                    {
-                        "scope": {"name": "scope-a"},
-                        "spans": [_make_otlp_span(
-                            span_id="A", start_ns=1000000000, end_ns=2000000000,
-                            attributes=_genai_attrs(model="model-a"),
-                        )],
-                    },
-                    {
-                        "scope": {"name": "scope-b"},
-                        "spans": [_make_otlp_span(
-                            span_id="B", start_ns=3000000000, end_ns=4000000000,
-                            attributes=_genai_attrs(model="model-b"),
-                        )],
-                    },
+    def test_spans_sorted_by_start_time(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                name="execute_tool read",
+                span_id="s2",
+                start_ns="2000000000000",
+                end_ns="2000100000000",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="execute_tool"),
+                    _otlp_attr("gen_ai.tool.name", string_val="read"),
                 ],
-            }],
+            ),
+            _make_otlp_span(
+                name="chat gpt-4",
+                span_id="s1",
+                start_ns="1000000000000",
+                end_ns="1000500000000",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.request.model", string_val="gpt-4"),
+                ],
+            ),
+        ]
+        path = _write_otlp_json(tmp_path / "unordered.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.steps[0].type == "llm_call"
+        assert trace.steps[0].name == "gpt-4"
+        assert trace.steps[1].type == "tool_call"
+        assert trace.steps[1].name == "read"
+
+    def test_invoke_agent_span(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                name="invoke_agent my-agent",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="invoke_agent"),
+                    _otlp_attr("gen_ai.agent.name", string_val="my-agent"),
+                    _otlp_attr("gen_ai.agent.description", string_val="Fix the login bug"),
+                ],
+            ),
+        ]
+        path = _write_otlp_json(tmp_path / "agent.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.task == "Fix the login bug"
+        assert trace.step_count == 1
+        assert trace.steps[0].type == "decision"
+
+    def test_no_tokens_span(self, tmp_path):
+        spans = [
+            _make_otlp_span(
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.request.model", string_val="local-model"),
+                ],
+            ),
+        ]
+        path = _write_otlp_json(tmp_path / "no_tokens.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.llm_calls[0].tokens is None
+        assert trace.total_tokens.total == 0
+
+    def test_spans_without_gen_ai_operation_are_skipped(self, tmp_path):
+        spans = [
+            _make_otlp_span(name="HTTP GET /api/data", attributes=[]),
+            _make_otlp_span(
+                name="chat model-x",
+                attributes=[
+                    _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                    _otlp_attr("gen_ai.request.model", string_val="model-x"),
+                ],
+            ),
+        ]
+        path = _write_otlp_json(tmp_path / "mixed.json", _make_otlp_export(spans))
+        trace = ingest_otlp_json(path)
+
+        assert trace.step_count == 1
+        assert trace.llm_calls[0].name == "model-x"
+
+    def test_multiple_scope_spans(self, tmp_path):
+        data = {
+            "resourceSpans": [
+                {
+                    "resource": {"attributes": [_otlp_attr("service.name", string_val="agent-a")]},
+                    "scopeSpans": [
+                        {
+                            "scope": {"name": "scope-1"},
+                            "spans": [
+                                _make_otlp_span(
+                                    span_id="s1",
+                                    start_ns="1000000000000",
+                                    end_ns="1000100000000",
+                                    attributes=[
+                                        _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                                        _otlp_attr("gen_ai.request.model", string_val="m1"),
+                                    ],
+                                ),
+                            ],
+                        },
+                        {
+                            "scope": {"name": "scope-2"},
+                            "spans": [
+                                _make_otlp_span(
+                                    span_id="s2",
+                                    start_ns="1000200000000",
+                                    end_ns="1000300000000",
+                                    attributes=[
+                                        _otlp_attr("gen_ai.operation.name", string_val="chat"),
+                                        _otlp_attr("gen_ai.request.model", string_val="m2"),
+                                    ],
+                                ),
+                            ],
+                        },
+                    ],
+                }
+            ]
         }
-        trace = ingest_otlp(data)
+        path = _write_otlp_json(tmp_path / "multi_scope.json", data)
+        trace = ingest_otlp_json(path)
+
         assert trace.step_count == 2
-        assert trace.steps[0].name == "model-a"
-        assert trace.steps[1].name == "model-b"
+        assert trace.llm_calls[0].name == "m1"
+        assert trace.llm_calls[1].name == "m2"

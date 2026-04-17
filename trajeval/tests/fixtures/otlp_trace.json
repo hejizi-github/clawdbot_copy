@@ -3,71 +3,61 @@
     {
       "resource": {
         "attributes": [
-          {
-            "key": "service.name",
-            "value": { "stringValue": "my-agent" }
-          },
-          {
-            "key": "service.version",
-            "value": { "stringValue": "1.0.0" }
-          }
+          {"key": "service.name", "value": {"stringValue": "my-agent"}}
         ]
       },
       "scopeSpans": [
         {
-          "scope": {
-            "name": "opentelemetry.instrumentation.genai",
-            "version": "0.5.0"
-          },
+          "scope": {"name": "agent.executor"},
           "spans": [
             {
-              "traceId": "AAAA1234BBBB5678CCCC9012DDDDEE00",
-              "spanId": "1111111111111111",
+              "traceId": "abc123def456",
+              "spanId": "span001",
               "parentSpanId": "",
-              "name": "chat gpt-4o",
+              "name": "ChatCompletion",
+              "kind": 3,
               "startTimeUnixNano": "1700000000000000000",
               "endTimeUnixNano": "1700000002000000000",
-              "kind": 3,
               "attributes": [
-                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
-                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } },
-                { "key": "gen_ai.response.model", "value": { "stringValue": "gpt-4o-2024-08-06" } },
-                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
-                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "500" } },
-                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "120" } }
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
+                {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-4"}},
+                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "150"}},
+                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "200"}}
               ],
-              "status": {}
+              "status": {"code": 0}
             },
             {
-              "traceId": "AAAA1234BBBB5678CCCC9012DDDDEE00",
-              "spanId": "2222222222222222",
-              "parentSpanId": "1111111111111111",
-              "name": "tool_call read_file",
+              "traceId": "abc123def456",
+              "spanId": "span002",
+              "parentSpanId": "span001",
+              "name": "execute_tool read_file",
+              "kind": 1,
               "startTimeUnixNano": "1700000002000000000",
               "endTimeUnixNano": "1700000002500000000",
-              "kind": 3,
               "attributes": [
-                { "key": "tool.name", "value": { "stringValue": "read_file" } },
-                { "key": "tool.input", "value": { "stringValue": "{\"path\": \"main.py\"}" } }
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "execute_tool"}},
+                {"key": "gen_ai.tool.name", "value": {"stringValue": "read_file"}},
+                {"key": "gen_ai.tool.call.arguments", "value": {"stringValue": "{\"path\": \"report.pdf\"}"}},
+                {"key": "gen_ai.tool.call.result", "value": {"stringValue": "File content here..."}}
               ],
-              "status": {}
+              "status": {"code": 0}
             },
             {
-              "traceId": "AAAA1234BBBB5678CCCC9012DDDDEE00",
-              "spanId": "3333333333333333",
-              "parentSpanId": "",
-              "name": "chat gpt-4o",
-              "startTimeUnixNano": "1700000003000000000",
-              "endTimeUnixNano": "1700000005000000000",
+              "traceId": "abc123def456",
+              "spanId": "span003",
+              "parentSpanId": "span001",
+              "name": "ChatCompletion",
               "kind": 3,
+              "startTimeUnixNano": "1700000002500000000",
+              "endTimeUnixNano": "1700000005000000000",
               "attributes": [
-                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
-                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } },
-                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
-                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "800" } },
-                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "200" } }
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
+                {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-4"}},
+                {"key": "gen_ai.output.messages", "value": {"stringValue": "The quarterly report shows strong performance..."}},
+                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "500"}},
+                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "300"}}
               ],
-              "status": {}
+              "status": {"code": 0}
             }
           ]
         }

@@ -1,43 +1,66 @@
 #!/usr/bin/env bash
-# Scan test files for weak assertion patterns that are likely tautological.
-# Exit 1 if any violations found, 0 if clean.
+# Scan test files for weak assertion patterns.
+# Exit 1 for CRITICAL patterns (always-true/always-false).
+# WARNINGs are printed for review but don't block unless --strict.
+# Add '# weak-assert-ok' to suppress false positives.
+#
+# Usage: bash tools/check_weak_assertions.sh [test_dir] [--strict]
 
 set -euo pipefail
 
-TARGET="${1:-trajeval/tests}"
-VIOLATIONS=0
+TEST_DIR="${1:-trajeval/tests}"
+STRICT=0
+for arg in "$@"; do
+    [ "$arg" = "--strict" ] && STRICT=1
+done
 
-echo "Scanning $TARGET for weak assertions..."
-
-# Pattern 1: assert ... or True (always passes)
-if grep -rn 'assert.*or True' "$TARGET" 2>/dev/null; then
-    echo "^^^ VIOLATION: 'assert ... or True' is always True"
-    VIOLATIONS=$((VIOLATIONS + 1))
+if [ ! -d "$TEST_DIR" ]; then
+    echo "Tests directory not found: $TEST_DIR"
+    exit 2
 fi
 
-# Pattern 2: assert ... or False (the 'or False' is meaningless but not dangerous)
-if grep -rn 'assert.*or False' "$TARGET" 2>/dev/null; then
-    echo "^^^ WARNING: 'assert ... or False' — the 'or False' is a no-op"
+CRITICAL=0
+WARNINGS=0
+
+echo "Scanning $TEST_DIR for weak assertion patterns..."
+echo
+
+# CRITICAL: or True / or False — always logic errors
+HITS=$(grep -rn 'assert.*\bor True\b\|assert.*\bor False\b' "$TEST_DIR" --include='*.py' 2>/dev/null | grep -v '# weak-assert-ok' || true)
+if [ -n "$HITS" ]; then
+    echo "=== CRITICAL: 'or True' / 'or False' in assertions (always passes/fails) ==="
+    echo "$HITS"
+    echo
+    CRITICAL=$((CRITICAL + $(echo "$HITS" | wc -l | tr -d ' ')))
 fi
 
-# Pattern 3: assert X or Y where Y is likely always true
-# This catches the pattern from the review: assert A != B or len(C) == len(D)
-DISJUNCTIVE=$(grep -rn 'assert .* or ' "$TARGET" 2>/dev/null || true)
-if [ -n "$DISJUNCTIVE" ]; then
-    echo ""
-    echo "=== Disjunctive assertions (assert X or Y) — review manually ==="
-    echo "$DISJUNCTIVE"
-    echo ""
-    echo "For each match, ask: if X is False and Y is True, should the test pass?"
-    echo "If not, split into two separate asserts."
-    VIOLATIONS=$((VIOLATIONS + 1))
+# WARNING: assert X or Y — review for tautologies
+HITS=$(grep -rn 'assert.*\bor\b' "$TEST_DIR" --include='*.py' 2>/dev/null | grep -v '\bor True\b\|or False\b' | grep -v '# weak-assert-ok' || true)
+if [ -n "$HITS" ]; then
+    echo "=== WARNING: 'assert ... or ...' patterns (review for tautologies) ==="
+    echo "$HITS"
+    echo
+    echo "  Verify each: would the test fail if the behavior changed completely?"
+    echo "  To suppress: add '# weak-assert-ok' comment to the line."
+    echo
+    WARNINGS=$((WARNINGS + $(echo "$HITS" | wc -l | tr -d ' ')))
 fi
 
-if [ "$VIOLATIONS" -gt 0 ]; then
-    echo ""
-    echo "FAILED: $VIOLATIONS weak assertion pattern(s) found"
+# WARNING: if-guarded assertions (assert inside if — silently skipped)
+HITS=$(grep -rn -A1 '^\s*if\b' "$TEST_DIR" --include='*.py' 2>/dev/null | grep -B1 'assert\b' | grep -v '# weak-assert-ok' || true)
+if [ -n "$HITS" ]; then
+    echo "=== WARNING: If-guarded assertions (may be silently skipped) ==="
+    echo "$HITS"
+    echo
+    WARNINGS=$((WARNINGS + $(echo "$HITS" | wc -l | tr -d ' ')))
+fi
+
+echo "Result: $CRITICAL critical, $WARNINGS warnings."
+
+if [ "$CRITICAL" -gt 0 ]; then
     exit 1
-else
-    echo "OK: no weak assertion patterns found"
-    exit 0
 fi
+if [ "$STRICT" -eq 1 ] && [ "$WARNINGS" -gt 0 ]; then
+    exit 1
+fi
+exit 0

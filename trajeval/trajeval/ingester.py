@@ -455,6 +455,222 @@ def _parse_step(raw: dict, index: int) -> TraceStep:
     )
 
 
+def ingest_otlp_json(source: str | Path) -> AgentTrace:
+    """Ingest an OpenTelemetry OTLP JSON trace export into AgentTrace.
+
+    Supports the standard OTLP JSON format with GenAI semantic conventions:
+    - gen_ai.operation.name (chat, text_completion) → llm_call
+    - execute_tool spans → tool_call
+    - Status code 2 → error
+    """
+    path = Path(source)
+    if not path.exists():
+        raise IngestError(f"File not found: {path}")
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise IngestError(f"Invalid JSON in {path}: {e}") from e
+
+    resource_spans = data.get("resourceSpans", [])
+    if not resource_spans:
+        raise IngestError("No resourceSpans found in OTLP JSON")
+
+    all_spans: list[dict] = []
+    agent_name = "unknown"
+    trace_id = ""
+
+    for rs in resource_spans:
+        resource_attrs = _otlp_attrs_to_dict(rs.get("resource", {}).get("attributes", []))
+        if "service.name" in resource_attrs and agent_name == "unknown":
+            agent_name = resource_attrs["service.name"]
+
+        for ss in rs.get("scopeSpans", []):
+            for span in ss.get("spans", []):
+                all_spans.append(span)
+                if not trace_id and span.get("traceId"):
+                    trace_id = span["traceId"]
+
+    all_spans.sort(key=lambda s: int(s.get("startTimeUnixNano", "0") or "0"))
+
+    steps: list[TraceStep] = []
+    task = ""
+
+    for span in all_spans:
+        attrs = _otlp_attrs_to_dict(span.get("attributes", []))
+        step = _otlp_span_to_step(span, attrs)
+        if step is None:
+            continue
+
+        if attrs.get("gen_ai.agent.name") and agent_name == "unknown":
+            agent_name = attrs["gen_ai.agent.name"]
+
+        if not task and attrs.get("gen_ai.operation.name") == "invoke_agent":
+            task = str(attrs.get("gen_ai.agent.description", ""))
+
+        steps.append(step)
+
+    total_tokens = _aggregate_tokens(steps, None)
+    total_duration = sum(s.duration_ms for s in steps)
+
+    final_output = ""
+    for step in reversed(steps):
+        if step.type == "llm_call" and step.output.get("text"):
+            final_output = step.output["text"][:500]
+            break
+
+    return AgentTrace(
+        trace_id=trace_id or str(uuid.uuid4()),
+        agent_name=agent_name,
+        task=task,
+        steps=steps,
+        final_output=final_output,
+        total_duration_ms=total_duration,
+        total_tokens=total_tokens,
+        metadata={"source_format": "otlp_json"},
+    )
+
+
+def _otlp_attrs_to_dict(attributes: list[dict]) -> dict:
+    """Convert OTLP attribute list to a flat dict."""
+    result = {}
+    for attr in attributes:
+        key = attr.get("key", "")
+        value = attr.get("value", {})
+        result[key] = _otlp_value(value)
+    return result
+
+
+def _otlp_value(value: dict):
+    """Extract a Python value from an OTLP attribute value object."""
+    if "stringValue" in value:
+        return value["stringValue"]
+    if "intValue" in value:
+        return int(value["intValue"])
+    if "doubleValue" in value:
+        return float(value["doubleValue"])
+    if "boolValue" in value:
+        return value["boolValue"]
+    if "arrayValue" in value:
+        return [_otlp_value(v) for v in value["arrayValue"].get("values", [])]
+    return str(value)
+
+
+_LLM_OPERATIONS = {"chat", "text_completion", "generate_content", "embeddings"}
+
+
+def _otlp_span_to_step(span: dict, attrs: dict) -> TraceStep | None:
+    """Convert a single OTLP span to a TraceStep, or None if not relevant."""
+    operation = attrs.get("gen_ai.operation.name", "")
+    span_name = span.get("name", "")
+    status_code = span.get("status", {}).get("code", 0)
+
+    start_ns = int(span.get("startTimeUnixNano", "0") or "0")
+    end_ns = int(span.get("endTimeUnixNano", "0") or "0")
+    duration_ms = (end_ns - start_ns) / 1_000_000 if end_ns > start_ns else 0.0
+
+    input_tokens = attrs.get("gen_ai.usage.input_tokens", 0)
+    output_tokens = attrs.get("gen_ai.usage.output_tokens", 0)
+    tokens = None
+    if input_tokens or output_tokens:
+        p = int(input_tokens) if input_tokens else 0
+        c = int(output_tokens) if output_tokens else 0
+        tokens = TokenUsage(prompt=p, completion=c, total=p + c)
+
+    if status_code == 2:
+        error_msg = span.get("status", {}).get("message", "")
+        error_type = attrs.get("error.type", "unknown_error")
+        return TraceStep(
+            type="error",
+            name=error_type,
+            input={},
+            output={"error": error_msg or error_type},
+            duration_ms=duration_ms,
+            tokens=tokens,
+            metadata=_span_metadata(span, attrs),
+        )
+
+    if operation in _LLM_OPERATIONS:
+        model = attrs.get("gen_ai.request.model", "") or attrs.get("gen_ai.response.model", "")
+        name = model or span_name
+        output_text = ""
+        output_messages = attrs.get("gen_ai.output.messages")
+        if isinstance(output_messages, str):
+            output_text = output_messages[:500]
+        elif isinstance(output_messages, list) and output_messages:
+            first = output_messages[0]
+            if isinstance(first, dict):
+                output_text = str(first.get("content", ""))[:500]
+            elif isinstance(first, str):
+                output_text = first[:500]
+
+        return TraceStep(
+            type="llm_call",
+            name=name,
+            input={"messages": attrs.get("gen_ai.input.messages", "")},
+            output={"text": output_text},
+            duration_ms=duration_ms,
+            tokens=tokens,
+            metadata=_span_metadata(span, attrs),
+        )
+
+    if operation == "execute_tool" or span_name.startswith("execute_tool "):
+        tool_name = attrs.get("gen_ai.tool.name", "")
+        if not tool_name and span_name.startswith("execute_tool "):
+            tool_name = span_name[len("execute_tool "):]
+        tool_args = attrs.get("gen_ai.tool.call.arguments", "")
+        tool_result = attrs.get("gen_ai.tool.call.result", "")
+        return TraceStep(
+            type="tool_call",
+            name=tool_name or "unknown_tool",
+            input={"arguments": tool_args} if tool_args else {},
+            output={"text": str(tool_result)} if tool_result else {},
+            duration_ms=duration_ms,
+            tokens=tokens,
+            metadata=_span_metadata(span, attrs),
+        )
+
+    if operation == "invoke_agent" or operation == "create_agent":
+        return TraceStep(
+            type="decision",
+            name=attrs.get("gen_ai.agent.name", span_name),
+            input={},
+            output={},
+            duration_ms=duration_ms,
+            tokens=tokens,
+            metadata=_span_metadata(span, attrs),
+        )
+
+    if operation:
+        return TraceStep(
+            type="decision",
+            name=span_name or operation,
+            input={},
+            output={},
+            duration_ms=duration_ms,
+            tokens=tokens,
+            metadata=_span_metadata(span, attrs),
+        )
+
+    return None
+
+
+def _span_metadata(span: dict, attrs: dict) -> dict:
+    """Extract metadata from an OTLP span."""
+    meta: dict = {}
+    if span.get("spanId"):
+        meta["span_id"] = span["spanId"]
+    if span.get("parentSpanId"):
+        meta["parent_span_id"] = span["parentSpanId"]
+    provider = attrs.get("gen_ai.provider.name")
+    if provider:
+        meta["provider"] = provider
+    tool_call_id = attrs.get("gen_ai.tool.call.id")
+    if tool_call_id:
+        meta["tool_call_id"] = tool_call_id
+    return meta
+
+
 def _aggregate_tokens(steps: list[TraceStep], explicit: dict | None) -> TokenUsage:
     if explicit:
         return TokenUsage(**explicit)
