@@ -1,0 +1,13 @@
+## Session Summary
+
+**Delivered**: CLI integration tests for `--input-format` + packaging polish
+
+- **+14 tests** (426 → 440): Full CLI integration coverage for `--input-format auto|json|clawdbot` across `eval`, `judge`, `compare`, `annotate` commands, plus error cases (malformed/empty JSONL)
+- **Clawdbot JSONL fixture**: `tests/fixtures/clawdbot_session.jsonl` — realistic multi-step session with user→assistant→tool→assistant flow
+- **py.typed marker**: Package now PEP 561 compliant for type-checking consumers
+- **Variable shadowing fix**: `ingester.py` line 22 `text` → `raw` to avoid shadowing with user content variable at line 55
+- **Build verified**: `python -m build` produces working wheel, `pip install -e .` works, `trajeval --version` outputs correctly
+
+All three review suggestions from last session addressed: CLI integration tests (done), packaging (verified + py.typed), and the ingester shadowing (fixed).
+
+**Next**: Real Clawdbot JSONL e2e test with production data, or pivot to OTLP support / PyPI publish preparation.
