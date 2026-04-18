@@ -295,3 +295,178 @@ def _aggregate_tokens(steps: list[TraceStep], explicit: dict | None) -> TokenUsa
     prompt = sum(s.tokens.prompt for s in steps if s.tokens)
     completion = sum(s.tokens.completion for s in steps if s.tokens)
     return TokenUsage(prompt=prompt, completion=completion, total=prompt + completion)
+
+
+# --- OpenTelemetry JSON export ingestion ---
+
+_OTEL_SPAN_KIND_CLIENT = 3
+_OTEL_SPAN_KIND_INTERNAL = 1
+
+
+def _get_otel_attr(attributes: list[dict], key: str) -> str | int | float | None:
+    """Extract a value from OTel's key-value attribute list."""
+    for attr in attributes:
+        if attr.get("key") == key:
+            val = attr.get("value", {})
+            for vk in ("stringValue", "intValue", "doubleValue", "boolValue"):
+                if vk in val:
+                    return val[vk]
+    return None
+
+
+def _classify_otel_span(span: dict) -> str:
+    """Map an OTel span to a TraceStep type based on attributes and naming."""
+    attrs = span.get("attributes", [])
+    name = span.get("name", "")
+    op = _get_otel_attr(attrs, "gen_ai.operation.name")
+
+    if op == "execute_tool" or name.startswith("execute_tool"):
+        return "tool_call"
+    if _get_otel_attr(attrs, "gen_ai.tool.name"):
+        return "tool_call"
+    if op in ("chat", "text_completion", "embeddings") or _get_otel_attr(attrs, "gen_ai.request.model"):
+        return "llm_call"
+
+    kind = span.get("kind", 0)
+    if kind == _OTEL_SPAN_KIND_CLIENT:
+        return "llm_call"
+    return "decision"
+
+
+def _parse_otel_span(span: dict) -> TraceStep:
+    """Convert a single OTel span into a TraceStep."""
+    attrs = span.get("attributes", [])
+    step_type = _classify_otel_span(span)
+
+    model = _get_otel_attr(attrs, "gen_ai.request.model") or ""
+    response_model = _get_otel_attr(attrs, "gen_ai.response.model") or ""
+    tool_name = _get_otel_attr(attrs, "gen_ai.tool.name") or ""
+    provider = _get_otel_attr(attrs, "gen_ai.provider.name") or ""
+    op_name = _get_otel_attr(attrs, "gen_ai.operation.name") or ""
+
+    if step_type == "tool_call":
+        name = tool_name or span.get("name", "unknown_tool")
+    else:
+        name = response_model or model or span.get("name", "unknown")
+
+    start_ns = int(span.get("startTimeUnixNano", 0))
+    end_ns = int(span.get("endTimeUnixNano", 0))
+    duration_ms = (end_ns - start_ns) / 1_000_000 if end_ns > start_ns else 0.0
+
+    input_tokens = _get_otel_attr(attrs, "gen_ai.usage.input_tokens") or 0
+    output_tokens = _get_otel_attr(attrs, "gen_ai.usage.output_tokens") or 0
+    input_tokens = int(input_tokens)
+    output_tokens = int(output_tokens)
+    tokens = TokenUsage(
+        prompt=input_tokens,
+        completion=output_tokens,
+        total=input_tokens + output_tokens,
+    ) if input_tokens or output_tokens else None
+
+    step_input: dict = {}
+    step_output: dict = {}
+
+    if step_type == "tool_call":
+        tool_args = _get_otel_attr(attrs, "gen_ai.tool.call.arguments")
+        tool_result = _get_otel_attr(attrs, "gen_ai.tool.call.result")
+        if tool_args:
+            step_input = {"arguments": tool_args} if isinstance(tool_args, str) else tool_args
+        if tool_result:
+            step_output = {"result": tool_result} if isinstance(tool_result, str) else tool_result
+    else:
+        if model:
+            step_input["model"] = model
+        conv_id = _get_otel_attr(attrs, "gen_ai.conversation.id")
+        if conv_id:
+            step_input["conversation_id"] = conv_id
+
+    metadata: dict = {
+        "otel_span_id": span.get("spanId", ""),
+        "otel_trace_id": span.get("traceId", ""),
+    }
+    if span.get("parentSpanId"):
+        metadata["otel_parent_span_id"] = span["parentSpanId"]
+    if provider:
+        metadata["provider"] = provider
+    if op_name:
+        metadata["operation"] = op_name
+
+    status = span.get("status", {})
+    if status.get("code") == 2:
+        step_type = "error"
+        step_output["error_message"] = status.get("message", "")
+
+    return TraceStep(
+        type=step_type,
+        name=name,
+        input=step_input,
+        output=step_output,
+        duration_ms=round(duration_ms, 2),
+        tokens=tokens,
+        metadata=metadata,
+    )
+
+
+def ingest_otlp_json(source: str | Path) -> AgentTrace:
+    """Ingest an OpenTelemetry JSON export file into AgentTrace.
+
+    Supports the standard OTLP JSON format with resourceSpans structure
+    and GenAI semantic conventions (gen_ai.* attributes).
+    """
+    path = Path(source)
+    if not path.exists():
+        raise IngestError(f"File not found: {path}")
+
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise IngestError(f"Empty file: {path}")
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise IngestError(f"Invalid JSON in {path}: {e}") from e
+
+    if not isinstance(data, dict) or "resourceSpans" not in data:
+        raise IngestError(
+            "Invalid OTLP format: expected top-level 'resourceSpans' key. "
+            "File should be an OpenTelemetry JSON export."
+        )
+
+    all_spans: list[dict] = []
+    service_name = ""
+    for rs in data["resourceSpans"]:
+        res_attrs = rs.get("resource", {}).get("attributes", [])
+        svc = _get_otel_attr(res_attrs, "service.name")
+        if svc and not service_name:
+            service_name = str(svc)
+        for ss in rs.get("scopeSpans", []):
+            for span in ss.get("spans", []):
+                all_spans.append(span)
+
+    if not all_spans:
+        raise IngestError("No spans found in OTLP data")
+
+    all_spans.sort(key=lambda s: int(s.get("startTimeUnixNano", 0)))
+
+    trace_id = all_spans[0].get("traceId", str(uuid.uuid4()))
+    steps = [_parse_otel_span(s) for s in all_spans]
+
+    agent_name_attr = None
+    for s in all_spans:
+        attrs = s.get("attributes", [])
+        agent_name_attr = _get_otel_attr(attrs, "gen_ai.agent.name")
+        if agent_name_attr:
+            break
+
+    total_tokens = _aggregate_tokens(steps, None)
+
+    return AgentTrace(
+        trace_id=trace_id,
+        agent_name=str(agent_name_attr) if agent_name_attr else service_name or "unknown",
+        task="",
+        steps=steps,
+        final_output="",
+        total_duration_ms=sum(s.duration_ms for s in steps),
+        total_tokens=total_tokens,
+        metadata={"source_format": "otlp_json", "service_name": service_name},
+    )

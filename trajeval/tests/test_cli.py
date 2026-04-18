@@ -1136,3 +1136,68 @@ class TestInputFormat:
         result = runner.invoke(main, ["eval", str(empty)])
         assert result.exit_code == 1
         assert "Error" in result.output
+
+    OTLP_FIXTURE = FIXTURES_DIR / "otlp_trace.json"
+
+    def test_eval_auto_detects_otlp(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(self.OTLP_FIXTURE),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "overall_score" in data
+        assert data["trace_id"] == "AAAA1234BBBB5678CCCC9012DDDDEEEE"
+
+    def test_eval_explicit_otlp_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(self.OTLP_FIXTURE),
+            "--input-format", "otlp",
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "overall_score" in data
+
+    def test_compare_otlp_vs_json(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare",
+            str(FIXTURES_DIR / "simple_trace.json"),
+            str(self.OTLP_FIXTURE),
+            "--format", "json",
+        ])
+        assert result.exit_code in (0, 1)
+        data = json.loads(result.output)
+        assert "metric_deltas" in data
+
+    def test_annotate_with_otlp(self, tmp_path):
+        out = tmp_path / "ann.jsonl"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "annotate", str(self.OTLP_FIXTURE),
+            "--input-format", "otlp",
+            "--output", str(out),
+            "--dimensions", "task_completion",
+        ], input="4\n")
+        assert result.exit_code == 0
+        assert "Saved 1 annotation" in result.output
+
+    @patch("trajeval.cli.judge")
+    def test_judge_with_otlp_format(self, mock_judge):
+        mock_judge.return_value = JudgeResult(
+            trace_id="otlp-test-001",
+            dimensions=[JudgeDimension(name="task_completion", score=4, explanation="good")],
+            overall_score=0.8,
+            model="test-model",
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "judge", str(self.OTLP_FIXTURE),
+            "--input-format", "otlp",
+            "--threshold", "0.7",
+        ])
+        assert result.exit_code == 0
+        assert mock_judge.call_count == 1
