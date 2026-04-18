@@ -199,6 +199,129 @@ class TestEvalCommand:
         assert fuzzy_loop["score"] < exact_loop["score"]
 
 
+class TestCompareBaseline:
+    """Tests for --compare-baseline flag on eval command."""
+
+    def _extract_json(self, output: str) -> dict:
+        """Extract JSON from output that may have 'Saved to...' on stderr mixed in."""
+        for line in output.split("\n"):
+            line = line.strip()
+            if line.startswith("{"):
+                return json.loads(output[output.index("{"):])
+        raise ValueError(f"No JSON found in output: {output[:200]}")
+
+    def test_compare_baseline_no_previous_result(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "baseline_comparison" not in data
+
+    def test_compare_baseline_detects_no_regression(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "baseline_comparison" in data
+        assert data["baseline_comparison"]["has_regression"] is False
+        assert data["baseline_comparison"]["overall_delta"] == 0.0
+
+    def test_compare_baseline_detects_regression(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        trace = str(FIXTURES_DIR / "simple_trace.json")
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", trace,
+            "--save", "--threshold", "0.3",
+            "--latency-budget", "99999",
+            "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", trace,
+            "--format", "json", "--threshold", "0.3",
+            "--latency-budget", "1",
+            "--compare-baseline", "--tolerance", "0.01",
+            "--db", str(db_path),
+        ])
+        data = json.loads(result.output)
+        assert "baseline_comparison" in data
+        assert data["baseline_comparison"]["has_regression"] is True
+        assert result.exit_code == 1
+
+    def test_compare_baseline_implies_save(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        stderr = result.stderr_bytes.decode() if result.stderr_bytes else ""
+        assert "Saved to" in stderr
+
+    def test_compare_baseline_table_output(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        assert "Compare" in result.output or "unchanged" in result.output.lower()
+
+    def test_compare_baseline_ci_output(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "ci", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        assert result.exit_code == 0
+        assert "Comparison" in result.output
+
+    def test_compare_baseline_includes_metric_deltas(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--threshold", "0.3", "--db", str(db_path),
+        ])
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.3",
+            "--compare-baseline", "--db", str(db_path),
+        ])
+        data = json.loads(result.output)
+        assert len(data["baseline_comparison"]["metric_deltas"]) > 0
+        delta_names = [d["name"] for d in data["baseline_comparison"]["metric_deltas"]]
+        assert "step_efficiency" in delta_names
+
+
 class TestFormatDetailsCompact:
     def test_empty_dict(self):
         assert _format_details_compact({}) == ""
@@ -1137,47 +1260,207 @@ class TestInputFormat:
         assert result.exit_code == 1
         assert "Error" in result.output
 
-    OTLP_FIXTURE = FIXTURES_DIR / "otlp_trace.json"
 
-    def test_eval_auto_detects_otlp(self):
-        runner = CliRunner()
+class TestEvalSaveFlag:
+    def test_save_creates_db(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        runner = CliRunner(mix_stderr=False)
         result = runner.invoke(main, [
-            "eval", str(self.OTLP_FIXTURE),
-            "--format", "json", "--threshold", "0.1",
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--db", str(db_path), "--threshold", "0.3",
+        ])
+        assert result.exit_code == 0
+        assert "Saved to" in result.stderr
+        assert db_path.exists()
+
+    def test_save_persists_result(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--db", str(db_path), "--threshold", "0.3",
+        ])
+        from trajeval.storage import TrajevalDB
+        with TrajevalDB(db_path) as db:
+            evals = db.list_evals()
+        assert len(evals) == 1
+        assert evals[0].overall_score > 0
+
+    def test_save_with_json_format(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--save", "--db", str(db_path),
+            "--format", "json", "--threshold", "0.3",
         ])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert "overall_score" in data
-        assert data["trace_id"] == "AAAA1234BBBB5678CCCC9012DDDDEEEE"
 
-    def test_eval_explicit_otlp_format(self):
+    def test_no_save_no_db_created(self, tmp_path):
+        db_path = tmp_path / "should_not_exist.db"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--threshold", "0.3",
+        ])
+        assert not db_path.exists()
+
+
+class TestHistoryCommand:
+    def _seed_db(self, db_path, count=3):
+        import time
+        from trajeval.metrics import EvalReport, MetricResult
+        from trajeval.storage import TrajevalDB
+        with TrajevalDB(db_path) as db:
+            for i in range(count):
+                report = EvalReport(
+                    trace_id=f"trace-{i:03d}",
+                    overall_score=0.5 + i * 0.1,
+                    passed=True,
+                    timestamp=1000.0 + i,
+                    metrics=[MetricResult(name="step_efficiency", score=0.8, passed=True)],
+                )
+                db.save_eval(report, agent_name="test-agent")
+
+    def test_history_table_output(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        self._seed_db(db_path)
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", str(db_path)])
+        assert result.exit_code == 0
+        assert "trace-002" in result.output
+
+    def test_history_json_output(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        self._seed_db(db_path)
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", str(db_path), "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["eval_results"]) == 3
+        assert data["eval_results"][0]["trace_id"] == "trace-002"
+
+    def test_history_filter_by_agent(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        self._seed_db(db_path)
+        from trajeval.metrics import EvalReport, MetricResult
+        from trajeval.storage import TrajevalDB
+        with TrajevalDB(db_path) as db:
+            db.save_eval(
+                EvalReport(trace_id="other-001", overall_score=0.9, passed=True, timestamp=2000.0,
+                           metrics=[MetricResult(name="m", score=0.9, passed=True)]),
+                agent_name="other-agent",
+            )
         runner = CliRunner()
         result = runner.invoke(main, [
-            "eval", str(self.OTLP_FIXTURE),
+            "history", "--db", str(db_path), "--agent", "test-agent", "--format", "json",
+        ])
+        data = json.loads(result.output)
+        assert len(data["eval_results"]) == 3
+
+    def test_history_limit(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        self._seed_db(db_path, count=10)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "history", "--db", str(db_path), "--limit", "2", "--format", "json",
+        ])
+        data = json.loads(result.output)
+        assert len(data["eval_results"]) == 2
+
+    def test_history_empty_db(self, tmp_path):
+        db_path = tmp_path / "hist.db"
+        runner = CliRunner()
+        result = runner.invoke(main, ["history", "--db", str(db_path)])
+        assert result.exit_code == 0
+        assert "No results found" in result.output
+
+
+class TestOtlpInputFormat:
+    """CLI integration tests for --input-format otlp."""
+
+    @staticmethod
+    def _write_otlp_fixture(tmp_path):
+        data = {
+            "resourceSpans": [{
+                "resource": {"attributes": [
+                    {"key": "service.name", "value": {"stringValue": "test-agent"}}
+                ]},
+                "scopeSpans": [{
+                    "scope": {"name": "test"},
+                    "spans": [
+                        {
+                            "traceId": "otlp-trace-001",
+                            "spanId": "s1",
+                            "parentSpanId": "",
+                            "name": "chat claude-sonnet-4-6",
+                            "kind": 3,
+                            "startTimeUnixNano": "1000000000000",
+                            "endTimeUnixNano": "1000500000000",
+                            "attributes": [
+                                {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
+                                {"key": "gen_ai.request.model", "value": {"stringValue": "claude-sonnet-4-6"}},
+                                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "200"}},
+                                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "80"}},
+                            ],
+                            "status": {"code": 0},
+                        },
+                        {
+                            "traceId": "otlp-trace-001",
+                            "spanId": "s2",
+                            "parentSpanId": "s1",
+                            "name": "execute_tool bash",
+                            "kind": 1,
+                            "startTimeUnixNano": "1000500000000",
+                            "endTimeUnixNano": "1000600000000",
+                            "attributes": [
+                                {"key": "gen_ai.operation.name", "value": {"stringValue": "execute_tool"}},
+                                {"key": "gen_ai.tool.name", "value": {"stringValue": "bash"}},
+                            ],
+                            "status": {"code": 0},
+                        },
+                    ],
+                }],
+            }],
+        }
+        path = tmp_path / "otlp_trace.json"
+        path.write_text(json.dumps(data))
+        return path
+
+    def test_eval_otlp_format(self, tmp_path):
+        path = self._write_otlp_fixture(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "eval", str(path),
             "--input-format", "otlp",
             "--format", "json", "--threshold", "0.1",
         ])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert "overall_score" in data
+        assert data["trace_id"] == "otlp-trace-001"
+        assert data["passed"] is True
+        assert len(data["metrics"]) > 0
 
-    def test_compare_otlp_vs_json(self):
+    def test_compare_otlp_format(self, tmp_path):
+        path = self._write_otlp_fixture(tmp_path)
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare",
-            str(FIXTURES_DIR / "simple_trace.json"),
-            str(self.OTLP_FIXTURE),
+            "compare", str(path), str(path),
+            "--input-format", "otlp",
             "--format", "json",
         ])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code == 0
         data = json.loads(result.output)
-        assert "metric_deltas" in data
+        assert data["has_regression"] is False
 
-    def test_annotate_with_otlp(self, tmp_path):
+    def test_annotate_otlp_format(self, tmp_path):
+        path = self._write_otlp_fixture(tmp_path)
         out = tmp_path / "ann.jsonl"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "annotate", str(self.OTLP_FIXTURE),
+            "annotate", str(path),
             "--input-format", "otlp",
             "--output", str(out),
             "--dimensions", "task_completion",
@@ -1186,18 +1469,144 @@ class TestInputFormat:
         assert "Saved 1 annotation" in result.output
 
     @patch("trajeval.cli.judge")
-    def test_judge_with_otlp_format(self, mock_judge):
+    def test_judge_otlp_format(self, mock_judge, tmp_path):
         mock_judge.return_value = JudgeResult(
-            trace_id="otlp-test-001",
+            trace_id="otlp-trace-001",
             dimensions=[JudgeDimension(name="task_completion", score=4, explanation="good")],
             overall_score=0.8,
             model="test-model",
         )
+        path = self._write_otlp_fixture(tmp_path)
         runner = CliRunner()
         result = runner.invoke(main, [
-            "judge", str(self.OTLP_FIXTURE),
+            "judge", str(path),
             "--input-format", "otlp",
             "--threshold", "0.7",
         ])
         assert result.exit_code == 0
         assert mock_judge.call_count == 1
+
+    def test_eval_otlp_different_trace_id_from_json(self, tmp_path):
+        otlp_path = self._write_otlp_fixture(tmp_path)
+        runner = CliRunner()
+        otlp_result = runner.invoke(main, [
+            "eval", str(otlp_path),
+            "--input-format", "otlp",
+            "--format", "json", "--threshold", "0.1",
+        ])
+        json_result = runner.invoke(main, [
+            "eval", str(FIXTURES_DIR / "simple_trace.json"),
+            "--format", "json", "--threshold", "0.1",
+        ])
+        assert otlp_result.exit_code == 0
+        assert json_result.exit_code == 0
+        otlp_data = json.loads(otlp_result.output)
+        json_data = json.loads(json_result.output)
+        assert otlp_data["trace_id"] != json_data["trace_id"]
+
+
+class TestBatchCommand:
+    def test_batch_on_fixtures_dir(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(FIXTURES_DIR), "--input-format", "json",
+        ])
+        assert result.exit_code in (0, 1)
+        assert "Batch Evaluation" in result.output
+
+    def test_batch_json_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(FIXTURES_DIR), "--input-format", "json",
+            "--format", "json",
+        ])
+        assert result.exit_code in (0, 1)
+        data = json.loads(result.output)
+        assert "total_traces" in data
+        assert "metric_aggregates" in data
+        assert "traces" in data
+        assert data["total_traces"] > 0
+
+    def test_batch_ci_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(FIXTURES_DIR), "--input-format", "json",
+            "--format", "ci",
+        ])
+        assert result.exit_code in (0, 1)
+        assert "BATCH_TOTAL=" in result.output
+        assert "BATCH_PASS_RATE=" in result.output
+
+    def test_batch_empty_dir_exit_1(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, ["batch", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "No trace files" in result.output
+
+    def test_batch_all_pass_exit_0(self, tmp_path):
+        trace = {
+            "trace_id": "good",
+            "steps": [
+                {"type": "llm_call", "name": "m", "input": {}, "output": {},
+                 "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+            ],
+        }
+        (tmp_path / "good.json").write_text(json.dumps(trace))
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(tmp_path), "--threshold", "0.5",
+        ])
+        assert result.exit_code == 0
+
+    def test_batch_with_failures_exit_1(self, tmp_path):
+        bad_trace = {
+            "trace_id": "bad",
+            "steps": [
+                {"type": "error", "name": "e1", "input": {}, "output": {}},
+                {"type": "error", "name": "e2", "input": {}, "output": {}},
+                {"type": "error", "name": "e3", "input": {}, "output": {}},
+                {"type": "error", "name": "e4", "input": {}, "output": {}},
+            ],
+        }
+        (tmp_path / "bad.json").write_text(json.dumps(bad_trace))
+        runner = CliRunner()
+        result = runner.invoke(main, ["batch", str(tmp_path)])
+        assert result.exit_code == 1
+
+    def test_batch_json_shows_per_trace_results(self, tmp_path):
+        for i in range(3):
+            trace = {"trace_id": f"t{i}", "steps": [
+                {"type": "llm_call", "name": "m", "input": {}, "output": {},
+                 "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+            ]}
+            (tmp_path / f"trace_{i}.json").write_text(json.dumps(trace))
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "batch", str(tmp_path), "--format", "json", "--threshold", "0.3",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["traces"]) == 3
+        assert all("trace_id" in t for t in data["traces"])
+        assert all("passed" in t for t in data["traces"])
+
+    def test_batch_threshold_affects_results(self, tmp_path):
+        trace = {
+            "trace_id": "t",
+            "steps": [
+                {"type": "llm_call", "name": "m1", "input": {}, "output": {}, "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+                {"type": "error", "name": "e", "input": {}, "output": {}},
+                {"type": "llm_call", "name": "m2", "input": {}, "output": {}, "tokens": {"prompt": 10, "completion": 5, "total": 15}},
+            ],
+        }
+        (tmp_path / "t.json").write_text(json.dumps(trace))
+        runner = CliRunner()
+        lenient = runner.invoke(main, [
+            "batch", str(tmp_path), "--format", "json", "--threshold", "0.3",
+        ])
+        strict = runner.invoke(main, [
+            "batch", str(tmp_path), "--format", "json", "--threshold", "0.99",
+        ])
+        lenient_data = json.loads(lenient.output)
+        strict_data = json.loads(strict.output)
+        assert lenient_data["passed_traces"] >= strict_data["passed_traces"]

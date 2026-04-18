@@ -3,71 +3,61 @@
     {
       "resource": {
         "attributes": [
-          {
-            "key": "service.name",
-            "value": {"stringValue": "my-agent-service"}
-          }
+          {"key": "service.name", "value": {"stringValue": "my-agent"}}
         ]
       },
       "scopeSpans": [
         {
-          "scope": {
-            "name": "opentelemetry.instrumentation.genai",
-            "version": "1.0.0"
-          },
+          "scope": {"name": "agent.executor"},
           "spans": [
             {
-              "traceId": "AAAA1234BBBB5678CCCC9012DDDDEEEE",
-              "spanId": "SPAN000000000001",
-              "name": "chat claude-sonnet-4-6",
+              "traceId": "abc123def456",
+              "spanId": "span001",
+              "parentSpanId": "",
+              "name": "ChatCompletion",
               "kind": 3,
               "startTimeUnixNano": "1700000000000000000",
-              "endTimeUnixNano": "1700000002500000000",
+              "endTimeUnixNano": "1700000002000000000",
               "attributes": [
                 {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
-                {"key": "gen_ai.request.model", "value": {"stringValue": "claude-sonnet-4-6"}},
-                {"key": "gen_ai.response.model", "value": {"stringValue": "claude-sonnet-4-6-20260514"}},
-                {"key": "gen_ai.provider.name", "value": {"stringValue": "anthropic"}},
-                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": 500}},
-                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": 120}},
-                {"key": "gen_ai.conversation.id", "value": {"stringValue": "conv-001"}},
-                {"key": "gen_ai.agent.name", "value": {"stringValue": "code-reviewer"}}
+                {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-4"}},
+                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "150"}},
+                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "200"}}
               ],
-              "status": {}
+              "status": {"code": 0}
             },
             {
-              "traceId": "AAAA1234BBBB5678CCCC9012DDDDEEEE",
-              "spanId": "SPAN000000000002",
-              "parentSpanId": "SPAN000000000001",
-              "name": "execute_tool Read",
+              "traceId": "abc123def456",
+              "spanId": "span002",
+              "parentSpanId": "span001",
+              "name": "execute_tool read_file",
               "kind": 1,
-              "startTimeUnixNano": "1700000002500000000",
-              "endTimeUnixNano": "1700000003000000000",
+              "startTimeUnixNano": "1700000002000000000",
+              "endTimeUnixNano": "1700000002500000000",
               "attributes": [
                 {"key": "gen_ai.operation.name", "value": {"stringValue": "execute_tool"}},
-                {"key": "gen_ai.tool.name", "value": {"stringValue": "Read"}},
-                {"key": "gen_ai.tool.call.arguments", "value": {"stringValue": "{\"file_path\": \"/src/main.py\"}"}},
-                {"key": "gen_ai.tool.call.result", "value": {"stringValue": "def main(): pass"}}
+                {"key": "gen_ai.tool.name", "value": {"stringValue": "read_file"}},
+                {"key": "gen_ai.tool.call.arguments", "value": {"stringValue": "{\"path\": \"report.pdf\"}"}},
+                {"key": "gen_ai.tool.call.result", "value": {"stringValue": "File content here..."}}
               ],
-              "status": {}
+              "status": {"code": 0}
             },
             {
-              "traceId": "AAAA1234BBBB5678CCCC9012DDDDEEEE",
-              "spanId": "SPAN000000000003",
-              "parentSpanId": "SPAN000000000001",
-              "name": "chat claude-sonnet-4-6",
+              "traceId": "abc123def456",
+              "spanId": "span003",
+              "parentSpanId": "span001",
+              "name": "ChatCompletion",
               "kind": 3,
-              "startTimeUnixNano": "1700000003000000000",
+              "startTimeUnixNano": "1700000002500000000",
               "endTimeUnixNano": "1700000005000000000",
               "attributes": [
                 {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
-                {"key": "gen_ai.request.model", "value": {"stringValue": "claude-sonnet-4-6"}},
-                {"key": "gen_ai.response.model", "value": {"stringValue": "claude-sonnet-4-6-20260514"}},
-                {"key": "gen_ai.provider.name", "value": {"stringValue": "anthropic"}},
-                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": 800}},
-                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": 200}}
+                {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-4"}},
+                {"key": "gen_ai.output.messages", "value": {"stringValue": "The quarterly report shows strong performance..."}},
+                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "500"}},
+                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "300"}}
               ],
-              "status": {}
+              "status": {"code": 0}
             }
           ]
         }

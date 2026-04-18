@@ -28,6 +28,16 @@ def loop_trace_path():
 
 
 @pytest.fixture
+def otlp_trace_path():
+    return FIXTURES_DIR / "otlp_trace.json"
+
+
+@pytest.fixture
+def otlp_error_trace_path():
+    return FIXTURES_DIR / "otlp_error_trace.json"
+
+
+@pytest.fixture
 def simple_trace_dict():
     return {
         "trace_id": "dict-trace-001",

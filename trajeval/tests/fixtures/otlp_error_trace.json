@@ -1,0 +1,48 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "error-agent"}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {"name": "agent.executor"},
+          "spans": [
+            {
+              "traceId": "err-trace-001",
+              "spanId": "span010",
+              "parentSpanId": "",
+              "name": "execute_tool database_query",
+              "kind": 1,
+              "startTimeUnixNano": "1700000000000000000",
+              "endTimeUnixNano": "1700000001000000000",
+              "attributes": [
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "execute_tool"}},
+                {"key": "gen_ai.tool.name", "value": {"stringValue": "database_query"}},
+                {"key": "error.type", "value": {"stringValue": "ConnectionTimeout"}}
+              ],
+              "status": {"code": 2, "message": "connection timeout"}
+            },
+            {
+              "traceId": "err-trace-001",
+              "spanId": "span011",
+              "parentSpanId": "",
+              "name": "execute_tool database_query",
+              "kind": 1,
+              "startTimeUnixNano": "1700000001000000000",
+              "endTimeUnixNano": "1700000002000000000",
+              "attributes": [
+                {"key": "gen_ai.operation.name", "value": {"stringValue": "execute_tool"}},
+                {"key": "gen_ai.tool.name", "value": {"stringValue": "database_query"}},
+                {"key": "gen_ai.tool.call.result", "value": {"stringValue": "success"}}
+              ],
+              "status": {"code": 0}
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
